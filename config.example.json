@@ -1,0 +1,21 @@
+{
+  "_comment": "将此文件复制为 config.json 并填入真实凭据，config.json 已在 .gitignore 中",
+
+  "canvas_base_url": "https://oc.sjtu.edu.cn",
+  "canvas_token": "YOUR_CANVAS_BEARER_TOKEN",
+
+  "aihaoke_cookies": {
+    "JSESSIONID": "YOUR_JSESSIONID",
+    "think_sso_user_login": "YOUR_LOGIN_COOKIE"
+  },
+
+  "phycai_cookies": {
+    "ASP.NET_SessionId": "YOUR_SESSION_ID"
+  },
+
+  "icourse_cookies": {
+    "NTESSTUDYSI": "YOUR_NTESSTUDYSI",
+    "STUDY_LIVE_LOGIN_INFO": "YOUR_LOGIN_INFO",
+    "ux": "YOUR_UX_COOKIE"
+  }
+}
