@@ -670,6 +670,32 @@ TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "setup_telegram",
+            "description": (
+                "配置 Telegram Bot：将 telegram_token 和可选的 allowed_ids 保存到 config.json，"
+                "然后可以用 sjtu-agent telegram-bot 启动 Bot。"
+                "用户说「接入Telegram」「配置Telegram」「怎么用Telegram」「Telegram bot」时调用。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "telegram_token": {
+                        "type": "string",
+                        "description": "BotFather 给出的 Bot Token，格式如 1234567890:ABCdefGHI…",
+                    },
+                    "allowed_ids": {
+                        "type": "array",
+                        "items": {"type": "integer"},
+                        "description": "允许使用 Bot 的 Telegram user_id 列表（整数）。留空则 Bot 启动后会显示任意用户的 chat_id，可先留空再补填。",
+                    },
+                },
+                "required": ["telegram_token"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "execute_python",
             "description": (
                 "在当前项目环境中动态执行 Python 代码片段，用于完成没有现成工具的任务。"
@@ -2977,6 +3003,61 @@ def tool_update_user_profile(updates: dict, reason: str = "") -> dict:
     return {"ok": True, "updated_keys": list(updates.keys()), "reason": reason}
 
 
+def tool_setup_telegram(telegram_token: str, allowed_ids: list | None = None) -> dict:
+    """
+    将 Telegram Bot Token 和可选的白名单 user_id 保存到 config.json。
+    保存后用户可执行 sjtu-agent telegram-bot 启动 Bot。
+    """
+    cfg: dict = {}
+    if CONFIG_PATH.exists():
+        try:
+            cfg = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+
+    cfg["telegram_token"] = telegram_token.strip()
+    if allowed_ids is not None:
+        cfg["telegram_allowed_ids"] = [int(i) for i in allowed_ids]
+
+    CONFIG_PATH.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    # 验证 token 是否有效（可选，无网络或防火墙限制时跳过）
+    token_valid: bool | None = None
+    bot_info: dict = {}
+    try:
+        import requests as _req
+        resp = _req.get(
+            f"https://api.telegram.org/bot{telegram_token.strip()}/getMe",
+            timeout=10,
+        )
+        if resp.status_code == 200:
+            token_valid = True
+            bot_info = resp.json().get("result", {})
+        else:
+            token_valid = False
+    except Exception:
+        token_valid = None  # 网络不通，跳过验证
+
+    result: dict = {
+        "saved": True,
+        "token_valid": token_valid,
+        "bot_username": bot_info.get("username", ""),
+        "bot_name": bot_info.get("first_name", ""),
+        "allowed_ids_set": allowed_ids or [],
+        "next_steps": [
+            "运行 `sjtu-agent telegram-bot` 启动 Bot（长轮询模式）。",
+            "在 Telegram 中发送 /id 给 Bot，可以获得自己的 user_id，然后把它添加到白名单。",
+            "如果还没有 Bot Token，先在 Telegram 里找 @BotFather，发 /newbot 创建。",
+        ],
+    }
+    if not allowed_ids:
+        result["tip"] = (
+            "当前白名单为空，Bot 启动后会对所有发消息的用户返回其 chat_id，"
+            "方便你确认自己的 user_id 后再来用 setup_telegram 补填白名单。"
+        )
+    return result
+
+
 def tool_execute_python(code: str, timeout: int = 60) -> dict:
     """
     在当前进程中安全地执行动态 Python 代码片段。
@@ -3365,6 +3446,7 @@ def run_tool(name: str, args: dict) -> str:
         elif name == "execute_python":           r = tool_execute_python(**args)
         elif name == "update_user_profile":      r = tool_update_user_profile(**args)
         elif name == "get_user_profile":         r = tool_get_user_profile()
+        elif name == "setup_telegram":           r = tool_setup_telegram(**args)
         else:                               r = {"error": f"未知工具: {name}"}
     except Exception as e:
         r = {"error": str(e)}
@@ -3581,7 +3663,17 @@ browse_mysjtu 的使用场景：成绩、绩点、奖学金、培养方案、注
 - 用户说"配置Canvas"/"设置Canvas"/"Canvas token 不会弄" → 调用 setup_canvas
 - 用户说"配置水源"/"授权水源" → 调用 setup_shuiyuan
 - 查询失败时主动提议重新登录（login_platform）
-- 遇到任何没有提到的交大相关需求 → 先思考哪个工具最接近，直接尝试，不要说"我的功能有限"或"我只能帮你做XXX"。"""
+- 遇到任何没有提到的交大相关需求 → 先思考哪个工具最接近，直接尝试，不要说"我的功能有限"或"我只能帮你做XXX"。
+
+## Telegram Bot 配置
+用户说「接入Telegram」「配置Telegram」「怎么把你接入Telegram」「Telegram bot 怎么用」时：
+1. 如果用户还没有 Bot Token：先引导去 Telegram 找 @BotFather，发 /newbot，按提示创建，拿到 Token
+2. 用户提供 Token 后：调用 setup_telegram(telegram_token=...) 保存配置并验证 Token 有效性
+3. 配置成功后告知用户：
+   - 运行 `sjtu-agent telegram-bot` 启动 Bot（长轮询，适合本地/服务器常驻）
+   - 在 Telegram 中给 Bot 发 /id，获取自己的 user_id
+   - 如果想限制 Bot 只响应自己，再次调用 setup_telegram 补填 allowed_ids
+4. Bot 功能与终端版本完全相同：可以查 DDL、看课表、查成绩、搜索校园内容等"""
 
 _TOOL_LABELS = {
     "list_canvas_assignments":  "正在列出 Canvas 作业",
@@ -3609,6 +3701,7 @@ _TOOL_LABELS = {
     "search_emails":          "正在搜索邮件…",
     "send_email":             "正在发送邮件…",
     "execute_python":         "正在执行代码…",
+    "setup_telegram":         "正在配置 Telegram Bot…",
 }
 
 
