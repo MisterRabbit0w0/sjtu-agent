@@ -4,6 +4,10 @@
 
 English summary: A deployable Shanghai Jiao Tong University campus assistant with terminal chat, Telegram bot, reminder daemon, and MCP server.
 
+👉 **[项目展示页](https://kuan-er.github.io/sjtu-agent)**
+
+如果这个项目对你有帮助，欢迎点一个 ⭐ Star，这对我很有意义！
+
 ## 安装
 
 macOS / Linux:
