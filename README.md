@@ -6,6 +6,54 @@ English summary: A deployable Shanghai Jiao Tong University campus assistant wit
 
 ## 安装
 
+推荐直接用一键安装脚本：
+
+macOS / Linux:
+
+```bash
+git clone https://github.com/kuan-er/sjtu-agent.git
+cd sjtu-agent
+bash install.sh
+```
+
+Windows PowerShell:
+
+```powershell
+git clone https://github.com/kuan-er/sjtu-agent.git
+cd sjtu-agent
+powershell -ExecutionPolicy Bypass -File .\install.ps1
+```
+
+这个脚本会自动完成下面这些步骤：
+
+- 创建或复用 `.venv`
+- 升级 `pip`
+- 安装当前仓库
+- 安装 Playwright Chromium
+- 默认直接启动 `sjtu-agent setup`
+
+如果你只想安装、不想立刻进入 setup：
+
+```bash
+bash install.sh --no-setup
+```
+
+```powershell
+.\install.ps1 -NoSetup
+```
+
+如果你想跳过 Chromium 安装：
+
+```bash
+bash install.sh --skip-playwright
+```
+
+```powershell
+.\install.ps1 -SkipPlaywright
+```
+
+手动安装方式仍然可用：
+
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
