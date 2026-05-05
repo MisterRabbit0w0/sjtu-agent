@@ -3279,18 +3279,14 @@ def chat_loop(client, model: str):
     model_box  = [model]   # 用列表包裹使内部可修改
     client_box = [client]  # 同理，切换模型时可替换 client
 
-    # ── 启动时后台预热 DDL 缓存 + 检查更新（不阻塞主线程）──────────────────────
+    # ── 启动时后台预热 DDL 缓存 + 检查更新（完全不阻塞主线程）──────────────────
     _prefetch_ddls_background()
     _update_thread = threading.Thread(target=_check_for_updates, daemon=True)
     _update_thread.start()
-
-    # ── 等待更新检查线程（最多 10 秒），完成后打印提示 ─────────────────────
-    _update_thread.join(timeout=10)
-    if _UPDATE_AVAILABLE.get("behind"):
-        behind = _UPDATE_AVAILABLE["behind"]
-        print(f"💡 有 {behind} 个新提交可用，运行 sjtu-agent update 即可一键更新。\n")
+    # 不在这里 join()，避免 git fetch 慢网络时卡住启动
 
     # ── 启动检查：直接调本地函数，无需 LLM roundtrip ─────────────────────────
+
     print("正在检查配置状态…", flush=True)
     setup = tool_check_setup()
     all_ok = (
@@ -3341,6 +3337,12 @@ def chat_loop(client, model: str):
         for _line in _due_reminders:
             print(_line)
         print()
+
+    # ── 在第一次等待用户输入前，最多等 2 秒看更新检查结果 ─────────────────
+    _update_thread.join(timeout=2)
+    if _UPDATE_AVAILABLE.get("behind"):
+        behind = _UPDATE_AVAILABLE["behind"]
+        print(f"💡 有 {behind} 个新提交可用，运行 sjtu-agent update 即可一键更新。\n")
 
     while True:
         try:
