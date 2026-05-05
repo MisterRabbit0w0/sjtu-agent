@@ -151,10 +151,10 @@ def _capture_turn(sess: dict, user_text: str) -> str:
 
 # ── 消息发送工具 ──────────────────────────────────────────────────────────────
 
-def _send_chunks(chat_id: int, text: str, max_len: int = 4000) -> None:
+def _send_chunks(chat_id: int, text: str, max_len: int = 4000, parse_mode: str = "") -> None:
     """自动分割超长消息（Telegram 限制 4096 字节）。"""
     while text:
-        bot.send_message(chat_id, text[:max_len])
+        bot.send_message(chat_id, text[:max_len], parse_mode=parse_mode or None)
         text = text[max_len:]
 
 
@@ -219,7 +219,7 @@ def cmd_report(msg):
         try:
             import daily_report
             report = daily_report.build_report()
-            _send_chunks(chat_id, report)
+            _send_chunks(chat_id, report, parse_mode="HTML")
         except Exception as e:
             bot.send_message(chat_id, f"❌ 生成日报出错：{e}")
         finally:
