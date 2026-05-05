@@ -2779,62 +2779,24 @@ def _anthropic_tools() -> list:
     return result
 
 
-def _stream_with_think_tags(stream) -> tuple[str, str, dict]:
+def _stream_with_think_tags(stream, spinner: "Spinner") -> tuple[str, str, dict]:
     """
     消费 OpenAI 兼容的流式响应，处理两种思考格式：
       1. delta.reasoning_content 字段（DeepSeek-R1 原生）
       2. <think>...</think> XML 标签混在 content 中（minimax / 部分模型）
 
-    思考内容实时以灰色暗字输出；正文内容缓冲到结束后统一返回（用于 markdown 渲染）。
+    思考过程只通过 Spinner 文字提示，不实时打印到终端（避免 ANSI 光标计算错误导致闪烁）。
+    正文内容全部缓冲，流结束后由调用方统一用 print_markdown_message 渲染。
 
     返回：(full_content_no_think, full_reasoning, tool_calls_map)
     """
     full_content   = ""   # 包含 <think> 的原始正文（用于存入 messages）
-    full_reasoning = ""   # 思考内容（仅用于展示，不存入 messages）
+    full_reasoning = ""   # 思考内容（不打印，只收集）
     tool_calls_map: dict[int, dict] = {}
-
-    # 思考状态机
-    STATE_NORMAL  = "normal"
-    STATE_THINK   = "think"    # 在 <think> 块内
-    STATE_PENDING = "pending"  # 可能是 </think> 的前半段
-    state = STATE_NORMAL
 
     TAG_OPEN  = "<think>"
     TAG_CLOSE = "</think>"
-    pending_buf = ""   # 暂存可能是 </think> 的片段
-
-    reasoning_started = False
-    _reasoning_newlines = 0   # 思考内容累计换行数，用于流结束后清除
-
-    def _emit_reasoning(text: str):
-        nonlocal reasoning_started, full_reasoning, _reasoning_newlines
-        if not reasoning_started:
-            # 打印前缀，暗灰色
-            sys.stdout.write("\033[2m💭 ")
-            sys.stdout.flush()
-            reasoning_started = True
-        sys.stdout.write(text)
-        sys.stdout.flush()
-        _reasoning_newlines += text.count("\n")
-        full_reasoning += text
-
-    def _clear_reasoning():
-        """清除已打印的思考内容，光标归位到思考开始前的行。"""
-        nonlocal reasoning_started, _reasoning_newlines
-        if not reasoning_started:
-            return
-        sys.stdout.write("\033[0m")   # 重置颜色
-        # 回到行首，然后上移 _reasoning_newlines 行，清除到屏幕底部
-        sys.stdout.write(f"\r\033[{_reasoning_newlines}A\033[J" if _reasoning_newlines > 0 else "\r\033[K")
-        sys.stdout.flush()
-        reasoning_started = False
-        _reasoning_newlines = 0
-
-    def _end_reasoning():
-        nonlocal state, pending_buf
-        _clear_reasoning()
-        state = STATE_NORMAL
-        pending_buf = ""
+    in_think = False   # 当前是否在 <think> 块内
 
     for chunk in stream:
         delta = chunk.choices[0].delta if chunk.choices else None
@@ -2844,46 +2806,26 @@ def _stream_with_think_tags(stream) -> tuple[str, str, dict]:
         # ── reasoning_content 字段（DeepSeek-R1 / Qwen 原生）────────────
         rc = getattr(delta, "reasoning_content", None) or ""
         if rc:
-            _emit_reasoning(rc)
+            if not full_reasoning:
+                spinner.update("思考中…")
+            full_reasoning += rc
 
         # ── content 字段 ────────────────────────────────────────────────
         text_chunk = delta.content or ""
         if text_chunk:
-            # reasoning_content 模式：正文出现时清除思考内容
-            if reasoning_started and TAG_OPEN not in text_chunk:
-                _clear_reasoning()
-
             full_content += text_chunk
 
-            # 状态机处理 <think> / </think>
-            i = 0
-            while i < len(text_chunk):
-                ch = text_chunk[i]
+            # 检测 <think> / </think>，更新 spinner 文字
+            if TAG_OPEN in text_chunk:
+                in_think = True
+                spinner.update("思考中…")
+            if TAG_CLOSE in text_chunk and in_think:
+                in_think = False
+                spinner.update("生成回复…")
 
-                if state == STATE_NORMAL:
-                    # 检查是否开始 <think>
-                    remain = text_chunk[i:]
-                    if TAG_OPEN in remain:
-                        pos = remain.index(TAG_OPEN)
-                        i += pos + len(TAG_OPEN)
-                        state = STATE_THINK
-                        # pos 前的内容是正文，不需要在这里输出（最终统一渲染）
-                    else:
-                        break  # 本 chunk 剩余都是正文，跳出
-
-                elif state == STATE_THINK:
-                    remain = text_chunk[i:]
-                    if TAG_CLOSE in remain:
-                        pos = remain.index(TAG_CLOSE)
-                        _emit_reasoning(remain[:pos])
-                        i += pos + len(TAG_CLOSE)
-                        _end_reasoning()
-                    else:
-                        _emit_reasoning(remain)
-                        break
-
-                else:
-                    break
+            # 如果已有思考内容、现在出现了真正正文，更新 spinner
+            if full_reasoning and not in_think and text_chunk.strip():
+                spinner.update("生成回复…")
 
         # ── 工具调用 ─────────────────────────────────────────────────────
         if delta.tool_calls:
@@ -2899,11 +2841,6 @@ def _stream_with_think_tags(stream) -> tuple[str, str, dict]:
                         entry["name"] += tc_delta.function.name
                     if tc_delta.function.arguments:
                         entry["arguments"] += tc_delta.function.arguments
-
-    # 流结束，清理思考显示
-    if reasoning_started:
-        sys.stdout.write("\033[0m\n")
-        sys.stdout.flush()
 
     # 从 full_content 中剥离 <think>...</think> 块，得到纯正文
     clean_content = re.sub(r"<think>.*?</think>", "", full_content, flags=re.DOTALL).strip()
@@ -2934,13 +2871,10 @@ def _run_one_turn_openai(client: OpenAI, model: str, messages: list) -> None:
                 _time.sleep(5)
                 continue
             raise
-        spinner.stop()
-
         try:
-            clean_content, _reasoning, tool_calls_map = _stream_with_think_tags(stream)
+            clean_content, _reasoning, tool_calls_map = _stream_with_think_tags(stream, spinner)
         except Exception as e:
-            sys.stdout.write("\033[0m\n")
-            sys.stdout.flush()
+            spinner.stop()
             raise
 
         # ── 渲染正文（markdown）──────────────────────────────────────────
@@ -3016,8 +2950,6 @@ def _run_one_turn_anthropic(client: Anthropic, model: str, messages: list) -> No
         in_text     = False
         full_text   = ""
         error_payload: dict | None = None
-        _anthropic_thinking_started = False  # 是否已开始写屏思考内容
-        _anthropic_thinking_lines   = 0      # 思考内容换行数，用于清除
 
         try:
             with _httpx.stream(
@@ -3059,23 +2991,11 @@ def _run_one_turn_anthropic(client: Anthropic, model: str, messages: list) -> No
                                 spinner.start("思考中…")  # Spinner 替代，隐藏思维链内容
                                 content_blocks.append({"type": "thinking", "thinking": ""})
                             elif btype == "text":
-                                # 文字 block 开始时先清除思考内容
+                                # 文字 block 开始：停止思考 Spinner，换一个等待 Spinner
                                 if in_thinking:
-                                    if _anthropic_thinking_started:
-                                        # 清除已打印的思考内容
-                                        sys.stdout.write("\033[0m")
-                                        if _anthropic_thinking_lines > 0:
-                                            sys.stdout.write(f"\r\033[{_anthropic_thinking_lines}A\033[J")
-                                        else:
-                                            sys.stdout.write("\r\033[K")
-                                        sys.stdout.flush()
-                                        _anthropic_thinking_started = False
-                                        _anthropic_thinking_lines = 0
-                                    else:
-                                        spinner.stop()
+                                    spinner.stop()
                                     in_thinking = False
                                 in_text = True
-                                # 正文完整接收后 markdown 渲染，此时只需等待
                                 spinner.start("处理中…")
                                 content_blocks.append({"type": "text", "text": ""})
                             elif btype == "tool_use":
@@ -3095,16 +3015,7 @@ def _run_one_turn_anthropic(client: Anthropic, model: str, messages: list) -> No
 
                             if dtype == "thinking_delta":
                                 chunk = delta.get("thinking", "")
-                                # 实时输出思考内容（灰色暗字）
-                                if in_thinking:
-                                    if not _anthropic_thinking_started:
-                                        spinner.stop()
-                                        sys.stdout.write("\033[2m💭 ")
-                                        sys.stdout.flush()
-                                        _anthropic_thinking_started = True
-                                    sys.stdout.write(chunk)
-                                    sys.stdout.flush()
-                                    _anthropic_thinking_lines += chunk.count("\n")
+                                # 只累积，不输出到终端（用 Spinner 代替，避免 ANSI 光标计算闪烁）
                                 if content_blocks and content_blocks[-1].get("type") == "thinking":
                                     content_blocks[-1]["thinking"] += chunk
 
