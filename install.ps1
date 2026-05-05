@@ -12,17 +12,17 @@ $ErrorActionPreference = "Stop"
 
 function Show-Help {
     @"
-SJTU Agent 一键安装脚本（PowerShell）
+SJTU Agent installer (PowerShell)
 
-用法:
-  .\install.ps1 [选项]
+Usage:
+  .\install.ps1 [options]
 
-选项:
-  -Python <cmd>          指定 Python 可执行文件，默认自动探测 py / python / python3
-  -SkipPlaywright        跳过 Playwright Chromium 安装
-  -NoSetup               安装完成后不自动启动 sjtu-agent setup
-  -ForceRecreateVenv     强制重建 .venv
-  -Help                  显示帮助
+Options:
+  -Python <cmd>          Specify the Python executable (default: auto-detect py / python / python3)
+  -SkipPlaywright        Skip Playwright Chromium installation
+  -NoSetup               Do not run sjtu-agent setup after installation
+  -ForceRecreateVenv     Force recreate the .venv virtual environment
+  -Help                  Show this help message
 "@
 }
 
@@ -38,7 +38,7 @@ function Resolve-PythonCommand {
 
     if ($RequestedPython) {
         if (-not (Get-Command $RequestedPython -ErrorAction SilentlyContinue)) {
-            throw "未找到 Python: $RequestedPython"
+            throw "Python executable not found: $RequestedPython"
         }
         return [pscustomobject]@{
             Executable = $RequestedPython
@@ -70,7 +70,7 @@ function Resolve-PythonCommand {
         }
     }
 
-    throw "未找到可用的 Python，请先安装 Python 3.10+，或使用 -Python 指定。"
+    throw "No usable Python found. Please install Python 3.10+ or specify one with -Python."
 }
 
 function Invoke-PythonCommand {
@@ -114,55 +114,55 @@ $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProjectDir = $ScriptDir
 
 if (-not (Test-Path (Join-Path $ProjectDir "pyproject.toml"))) {
-    throw "请从仓库根目录运行这个脚本。"
+    throw "Please run this script from the repository root directory."
 }
 
 $PythonCommand = Resolve-PythonCommand -RequestedPython $Python
 
 Invoke-PythonCommand -PythonCommand $PythonCommand -Arguments @(
     "-c",
-    "import sys; sys.exit('Python 3.10 或更高版本是必需的。') if sys.version_info < (3, 10) else None"
-) -ErrorMessage "Python 版本检查失败。"
+    "import sys; sys.exit('Python 3.10 or higher is required.') if sys.version_info < (3, 10) else None"
+) -ErrorMessage "Python version check failed."
 
 $VenvDir = Join-Path $ProjectDir ".venv"
 $VenvPython = Join-Path $VenvDir "Scripts\python.exe"
 
 if ($ForceRecreateVenv -and (Test-Path $VenvDir)) {
-    Write-Log "按要求重建虚拟环境: $VenvDir"
+    Write-Log "Recreating virtual environment: $VenvDir"
     Remove-Item -Recurse -Force $VenvDir
 }
 
 if ((Test-Path $VenvDir) -and -not (Test-Path $VenvPython)) {
-    Write-Log "检测到损坏的虚拟环境，准备重建: $VenvDir"
+    Write-Log "Detected broken virtual environment, recreating: $VenvDir"
     Remove-Item -Recurse -Force $VenvDir
 }
 
 if (-not (Test-Path $VenvDir)) {
-    Write-Log "创建虚拟环境: $VenvDir"
-    Invoke-PythonCommand -PythonCommand $PythonCommand -Arguments @("-m", "venv", $VenvDir) -ErrorMessage "创建虚拟环境失败。"
+    Write-Log "Creating virtual environment: $VenvDir"
+    Invoke-PythonCommand -PythonCommand $PythonCommand -Arguments @("-m", "venv", $VenvDir) -ErrorMessage "Failed to create virtual environment."
 }
 
-Write-Log "升级 pip"
-Invoke-ExternalCommand -Executable $VenvPython -Arguments @("-m", "pip", "install", "--upgrade", "pip") -ErrorMessage "升级 pip 失败。"
+Write-Log "Upgrading pip"
+Invoke-ExternalCommand -Executable $VenvPython -Arguments @("-m", "pip", "install", "--upgrade", "pip") -ErrorMessage "Failed to upgrade pip."
 
-Write-Log "安装 SJTU Agent"
-Invoke-ExternalCommand -Executable $VenvPython -Arguments @("-m", "pip", "install", "-e", $ProjectDir) -ErrorMessage "安装 SJTU Agent 失败。"
+Write-Log "Installing SJTU Agent"
+Invoke-ExternalCommand -Executable $VenvPython -Arguments @("-m", "pip", "install", "-e", $ProjectDir) -ErrorMessage "Failed to install SJTU Agent."
 
 if (-not $SkipPlaywright) {
-    Write-Log "安装 Playwright Chromium"
-    Invoke-ExternalCommand -Executable $VenvPython -Arguments @("-m", "playwright", "install", "chromium") -ErrorMessage "安装 Playwright Chromium 失败。"
+    Write-Log "Installing Playwright Chromium"
+    Invoke-ExternalCommand -Executable $VenvPython -Arguments @("-m", "playwright", "install", "chromium") -ErrorMessage "Failed to install Playwright Chromium."
 }
 
 if (-not $NoSetup) {
-    Write-Log "启动 sjtu-agent setup"
+    Write-Log "Launching sjtu-agent setup"
     & $VenvPython -m sjtu_agent setup
     exit $LASTEXITCODE
 }
 
 Write-Host ""
-Write-Host "安装完成。"
+Write-Host "Installation complete."
 Write-Host ""
-Write-Host "后续常用命令："
+Write-Host "Next steps:"
 Write-Host "  .\.venv\Scripts\Activate.ps1"
 Write-Host "  python -m sjtu_agent setup"
 Write-Host "  python -m sjtu_agent"
