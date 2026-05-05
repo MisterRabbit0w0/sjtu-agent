@@ -674,10 +674,12 @@ class SetupConversation:
 
     def handle_agent(self, status: dict) -> bool:
         current = status["agent"]
-        base_default = str(current.get("base_url") or "https://api.openai.com/v1")
-        model_default = str(current.get("model") or "gpt-4.1-mini")
+        base_default = str(current.get("base_url") or "https://models.sjtu.edu.cn/api/v1")
+        model_default = str(current.get("model") or "deepseek-chat")
 
         self.say("先把驱动 SJTU Agent 的大模型 API 配好。这样后面你可以直接进入真正的 agent 对话，而不是只靠固定问答。")
+        self.say("推荐使用交大致远一号 API（OpenAI 兼容接口），Base URL 为 https://models.sjtu.edu.cn/api/v1，模型默认 deepseek-chat。")
+        self.say("可用模型：deepseek-chat、deepseek-reasoner、glm-5、minimax、qwen3coder、qwen3vl。")
         self.say(f"请直接回复 API Base URL。直接回车就用默认值：{base_default}；如果你现在不想配，也可以回复 skip。")
         while True:
             raw = self.prompt()

@@ -3307,7 +3307,26 @@ def run_tool(name: str, args: dict) -> str:
 # Agent LLM 配置
 # ══════════════════════════════════════════════════════════════════════════════
 
+# 致远一号 API（交大官方 OpenAI 兼容接口）的环境变量名
+_ZHIYUAN_BASE_URL_ENV = "ZHIYUAN_BASE_URL"
+_ZHIYUAN_API_KEY_ENV  = "ZHIYUAN_API_KEY"
+_ZHIYUAN_DEFAULT_BASE = "https://models.sjtu.edu.cn/api/v1"
+_ZHIYUAN_DEFAULT_MODEL = "deepseek-chat"
+
+
 def load_agent_config() -> dict:
+    """加载 Agent LLM 配置，优先级：致远一号环境变量 > agent_config.json > 空配置。"""
+    # 1. 优先：致远一号环境变量
+    zhiyuan_base = os.environ.get(_ZHIYUAN_BASE_URL_ENV, "").strip()
+    zhiyuan_key  = os.environ.get(_ZHIYUAN_API_KEY_ENV, "").strip()
+    if zhiyuan_key:
+        return {
+            "base_url": zhiyuan_base or _ZHIYUAN_DEFAULT_BASE,
+            "api_key":  zhiyuan_key,
+            "model":    _ZHIYUAN_DEFAULT_MODEL,
+            "_source":  "zhiyuan_env",
+        }
+    # 2. fallback：agent_config.json（原有 Claude / 其他 OpenAI 配置）
     if AGENT_CONFIG_PATH.exists():
         return json.loads(AGENT_CONFIG_PATH.read_text())
     return {}
