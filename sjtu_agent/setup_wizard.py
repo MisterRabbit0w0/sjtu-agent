@@ -908,11 +908,11 @@ class SetupConversation:
             if intent in {"yes", "empty", "text"}:
                 try:
                     _import_browser_cookies()
+                    self.say("cookie 已导入到 config.json。")
                 except RuntimeError as exc:
                     self.say(f"cookie 导入失败：{exc}")
-                    self.skipped_steps.add("cookies")
-                    return True
-                self.say("cookie 已导入到 config.json。")
+                # 无论导入成功与否，都标记为已处理，避免因某个平台未登录 Chrome 而死循环
+                self.skipped_steps.add("cookies")
                 return True
             self.say("这一步你可以回复继续或者 skip。")
 

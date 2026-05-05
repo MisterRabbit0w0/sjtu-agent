@@ -2306,6 +2306,13 @@ def tool_download_assignments(
     output_dir: str = "./assignments",
 ) -> dict:
     cfg = dc.load_config()
+
+    # 自动跳过 aihaoke：仅有 locale cookie 说明未登录（不值得尝试，避免无效的 Playwright 登录）
+    _aihaoke_cookies = cfg.get("aihaoke_cookies", {})
+    _meaningful_aihaoke = {k: v for k, v in _aihaoke_cookies.items() if k != "locale"}
+    if not _meaningful_aihaoke and not skip_aihaoke:
+        skip_aihaoke = True
+
     results = dc.download_assignments(
         cfg,
         output_dir=output_dir,
