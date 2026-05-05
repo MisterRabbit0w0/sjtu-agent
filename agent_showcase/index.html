@@ -354,15 +354,16 @@
             <div class="workflow-copy">
                 <div class="section-label">快速开始</div>
                 <h2 class="section-title">安装<span class="gradient-text">很简单</span></h2>
-                <p class="section-desc">不需要手动编辑任何配置文件，Agent 会在首次启动时自动引导你完成设置。</p>
+                <p class="section-desc">支持 macOS / Windows / Linux，安装脚本会自动识别平台并注册后台任务，无需手动配置。</p>
 
                 <ol class="step-list">
                     <li>
                         <span class="step-num">1</span>
                         <div>
                             <strong>克隆仓库并安装依赖</strong>
-                            <p>运行安装脚本，自动配置虚拟环境。</p>
-                            <div class="code-block"><code>./install.sh</code></div>
+                            <p>运行对应平台的安装脚本，自动配置虚拟环境。</p>
+                            <div class="code-block"><code>./install.sh</code>&nbsp;&nbsp;<span style="color:var(--text-3);font-size:.78rem">macOS / Linux</span></div>
+                            <div class="code-block" style="margin-top:6px"><code>.\install.ps1</code>&nbsp;&nbsp;<span style="color:var(--text-3);font-size:.78rem">Windows (PowerShell)</span></div>
                         </div>
                     </li>
                     <li>
@@ -458,7 +459,7 @@
                         <span>需要我一直开着电脑吗？</span>
                         <span class="faq-chevron" aria-hidden="true">›</span>
                     </summary>
-                    <p>macOS 上通过 launchd 实现开机自启，Telegram Bot 和每日日报都在后台自动运行，不需要保持终端开启。</p>
+                    <p>不需要。macOS 通过 <strong>launchd</strong>、Windows 通过 <strong>Task Scheduler（schtasks）</strong>、Linux 通过 <strong>systemd</strong> 实现开机自启。安装脚本会自动识别当前平台并注册对应任务，Telegram Bot 和每日日报无需保持终端开启。</p>
                 </details>
                 <details class="faq-item">
                     <summary>
