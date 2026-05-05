@@ -164,3 +164,178 @@
         });
     });
 })();
+
+
+/* ─── Real-scene chat: messages appear one-by-one as section enters view ── */
+(function initSceneChat() {
+    const chat = document.querySelector('.tg-chat-scroll');
+    if (!chat) return;
+
+    const items = Array.from(chat.children);
+    // hide all items initially
+    items.forEach(el => {
+        el.style.opacity = '0';
+        el.style.transform = 'translateY(12px)';
+        el.style.transition = 'opacity .38s ease, transform .38s ease';
+    });
+
+    let triggered = false;
+    function reveal() {
+        if (triggered) return;
+        triggered = true;
+        items.forEach((el, i) => {
+            setTimeout(() => {
+                el.style.opacity = '1';
+                el.style.transform = 'none';
+                // scroll the container to bottom as each message appears
+                chat.scrollTo({ top: chat.scrollHeight, behavior: 'smooth' });
+            }, 200 + i * 450);
+        });
+    }
+
+    if (!('IntersectionObserver' in window)) { reveal(); return; }
+    const io = new IntersectionObserver(entries => {
+        if (entries[0].isIntersecting) { reveal(); io.disconnect(); }
+    }, { threshold: .25 });
+    const section = document.getElementById('real-scene');
+    if (section) io.observe(section);
+})();
+
+
+/* ─── Parallax: phone frames drift slightly on scroll ───────────────────── */
+(function initParallax() {
+    const frames = document.querySelectorAll('.phone-frame, .phone-frame-lg');
+    if (!frames.length || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+
+    let ticking = false;
+    window.addEventListener('scroll', () => {
+        if (ticking) return;
+        ticking = true;
+        requestAnimationFrame(() => {
+            const scrollY = window.scrollY;
+            frames.forEach((frame, i) => {
+                const dir = i % 2 === 0 ? 1 : -1;
+                const rect = frame.getBoundingClientRect();
+                const centerY = rect.top + rect.height / 2 - window.innerHeight / 2;
+                frame.style.transform = `translateY(${centerY * -0.035 * dir}px)`;
+            });
+            ticking = false;
+        });
+    }, { passive: true });
+})();
+
+
+/* ─── Button ripple effect ───────────────────────────────────────────────── */
+(function initRipple() {
+    function addRipple(e) {
+        const btn = e.currentTarget;
+        const rect = btn.getBoundingClientRect();
+        const ripple = document.createElement('span');
+        const size = Math.max(rect.width, rect.height) * 1.8;
+        ripple.style.cssText = `
+            position:absolute;width:${size}px;height:${size}px;
+            left:${e.clientX - rect.left - size / 2}px;
+            top:${e.clientY - rect.top - size / 2}px;
+            border-radius:50%;background:rgba(255,255,255,.18);
+            transform:scale(0);pointer-events:none;
+            animation:ripple-out .55s ease forwards;
+        `;
+        btn.style.position = 'relative';
+        btn.style.overflow = 'hidden';
+        btn.appendChild(ripple);
+        ripple.addEventListener('animationend', () => ripple.remove());
+    }
+
+    document.querySelectorAll('.primary-button, .secondary-button, .header-cta').forEach(btn => {
+        btn.addEventListener('click', addRipple);
+    });
+
+    // inject keyframe once
+    if (!document.getElementById('ripple-style')) {
+        const style = document.createElement('style');
+        style.id = 'ripple-style';
+        style.textContent = '@keyframes ripple-out{to{transform:scale(1);opacity:0}}';
+        document.head.appendChild(style);
+    }
+})();
+
+
+/* ─── Feature card 3-D tilt on mouse-move ───────────────────────────────── */
+(function initCardTilt() {
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    if ('ontouchstart' in window) return; // skip on touch devices
+
+    const STRENGTH = 6; // degrees
+
+    document.querySelectorAll('.feature-card, .boundary-card').forEach(card => {
+        card.addEventListener('mousemove', e => {
+            const rect = card.getBoundingClientRect();
+            const cx = rect.left + rect.width  / 2;
+            const cy = rect.top  + rect.height / 2;
+            const rx = ((e.clientY - cy) / (rect.height / 2)) * -STRENGTH;
+            const ry = ((e.clientX - cx) / (rect.width  / 2)) *  STRENGTH;
+            card.style.transform = `perspective(800px) rotateX(${rx}deg) rotateY(${ry}deg) translateY(-3px)`;
+            card.style.transition = 'transform .05s linear, box-shadow .05s linear';
+        });
+        card.addEventListener('mouseleave', () => {
+            card.style.transform = '';
+            card.style.transition = 'transform .35s ease, box-shadow .35s ease, border-color .2s';
+        });
+    });
+})();
+
+
+/* ─── Scene points: staggered slide-in when section visible ─────────────── */
+(function initScenePoints() {
+    const points = document.querySelectorAll('.scene-points li');
+    if (!points.length) return;
+
+    points.forEach(li => {
+        li.style.opacity = '0';
+        li.style.transform = 'translateX(-18px)';
+        li.style.transition = 'opacity .4s ease, transform .4s ease';
+    });
+
+    if (!('IntersectionObserver' in window)) {
+        points.forEach(li => { li.style.opacity='1'; li.style.transform='none'; });
+        return;
+    }
+
+    let done = false;
+    const io = new IntersectionObserver(entries => {
+        if (done || !entries[0].isIntersecting) return;
+        done = true;
+        points.forEach((li, i) => {
+            setTimeout(() => {
+                li.style.opacity = '1';
+                li.style.transform = 'none';
+            }, i * 160);
+        });
+        io.disconnect();
+    }, { threshold: .3 });
+
+    const section = document.getElementById('real-scene');
+    if (section) io.observe(section);
+})();
+
+
+/* ─── Smooth cursor blink on tg-report-title (typewriter feel) ──────────── */
+(function initTypingCursor() {
+    const title = document.querySelector('#tg-chat .tg-report-title');
+    if (!title) return;
+    const cursor = document.createElement('span');
+    cursor.style.cssText = `
+        display:inline-block;width:2px;height:.9em;
+        background:#4f8cff;margin-left:3px;
+        vertical-align:middle;border-radius:1px;
+        animation:blink-cur .9s step-end infinite;
+    `;
+    title.appendChild(cursor);
+
+    if (!document.getElementById('cursor-style')) {
+        const s = document.createElement('style');
+        s.id = 'cursor-style';
+        s.textContent = '@keyframes blink-cur{0%,100%{opacity:1}50%{opacity:0}}';
+        document.head.appendChild(s);
+    }
+})();
