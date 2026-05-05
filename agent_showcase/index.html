@@ -402,8 +402,8 @@
 
     <!-- 边界 -->
     <section class="section reveal-up">
-        <div class="section-label">设计边界</div>
-        <h2 class="section-title">什么是它会做的，<span class="gradient-text">什么是它不会做的</span></h2>
+        <div class="section-label">设计原则</div>
+        <h2 class="section-title">它是怎么工作的，<span class="gradient-text">又有哪些保障</span></h2>
         <div class="boundary-grid">
             <div class="boundary-card">
                 <div class="boundary-icon">🔒</div>
@@ -411,14 +411,14 @@
                 <p>账号信息写入本地文件，不默认上传到远端服务。</p>
             </div>
             <div class="boundary-card">
-                <div class="boundary-icon">🤝</div>
-                <h3>只提醒，不代写</h3>
-                <p>最后 5 分钟未提交时发紧急提醒并打开 Canvas 提交页，不自动生成内容替你上交。</p>
+                <div class="boundary-icon">⚙️</div>
+                <h3>Agent 自主编写代码实现功能</h3>
+                <p>当内置工具无法满足需求时，Agent 会自主生成 Python 脚本调用系统能力，动态扩展自身功能，无需人工介入。</p>
             </div>
             <div class="boundary-card">
-                <div class="boundary-icon">🧭</div>
-                <h3>失败会说清楚下一步</h3>
-                <p>Cookie 过期或登录失效时，直接提示原因和解决步骤，不只报错。</p>
+                <div class="boundary-icon">🔬</div>
+                <h3>工具链自动组合</h3>
+                <p>面对复杂任务时，Agent 会自动拆解步骤、调用多个工具串联执行，并在关键节点向你确认结果。</p>
             </div>
         </div>
     </section>
@@ -428,48 +428,52 @@
         <div class="section-label">常见问题</div>
         <h2 class="section-title">FAQ</h2>
         <div class="faq-grid">
-            <details class="faq-item" open>
-                <summary>
-                    <span>我不会写代码，真的能用吗？</span>
-                    <span class="faq-chevron" aria-hidden="true">›</span>
-                </summary>
-                <p>可以。这个项目的设计目标就是让你像聊天一样提需求，不要求你懂命令行或接口。</p>
-            </details>
-            <details class="faq-item">
-                <summary>
-                    <span>它是只能查信息，还是能帮我做事？</span>
-                    <span class="faq-chevron" aria-hidden="true">›</span>
-                </summary>
-                <p>两者都有。它既能查询，也能下载作业、读题、添加提醒、生成日报，以及在确认后执行作业提交等动作。</p>
-            </details>
-            <details class="faq-item">
-                <summary>
-                    <span>如果我只想用 Telegram，不想开终端？</span>
-                    <span class="faq-chevron" aria-hidden="true">›</span>
-                </summary>
-                <p>已提供 Telegram Bot 接入，适合把日常对话和提醒都放到熟悉的聊天界面里。配置后会在后台自动运行。</p>
-            </details>
-            <details class="faq-item">
-                <summary>
-                    <span>需要我一直开着电脑吗？</span>
-                    <span class="faq-chevron" aria-hidden="true">›</span>
-                </summary>
-                <p>macOS 上通过 launchd 实现开机自启，Telegram Bot 和每日日报都在后台自动运行，不需要保持终端开启。</p>
-            </details>
-            <details class="faq-item">
-                <summary>
-                    <span>它支持哪些大模型？</span>
-                    <span class="faq-chevron" aria-hidden="true">›</span>
-                </summary>
-                <p>支持任何 OpenAI 兼容接口（DeepSeek、学校超算集群等），也支持 Anthropic Claude 系列。</p>
-            </details>
-            <details class="faq-item">
-                <summary>
-                    <span>为什么比自己开很多网页更省事？</span>
-                    <span class="faq-chevron" aria-hidden="true">›</span>
-                </summary>
-                <p>它会替你决定去哪查、怎么查、结果怎么排优先级。你只保留「我要什么」，中间跳转都被折叠掉了。</p>
-            </details>
+            <div class="faq-col">
+                <details class="faq-item" open>
+                    <summary>
+                        <span>我不会写代码，真的能用吗？</span>
+                        <span class="faq-chevron" aria-hidden="true">›</span>
+                    </summary>
+                    <p>可以。这个项目的设计目标就是让你像聊天一样提需求，不要求你懂命令行或接口。</p>
+                </details>
+                <details class="faq-item">
+                    <summary>
+                        <span>它是只能查信息，还是能帮我做事？</span>
+                        <span class="faq-chevron" aria-hidden="true">›</span>
+                    </summary>
+                    <p>两者都有。它既能查询，也能下载作业、读题、添加提醒、生成日报，以及在确认后执行作业提交等动作。</p>
+                </details>
+                <details class="faq-item">
+                    <summary>
+                        <span>如果我只想用 Telegram，不想开终端？</span>
+                        <span class="faq-chevron" aria-hidden="true">›</span>
+                    </summary>
+                    <p>已提供 Telegram Bot 接入，适合把日常对话和提醒都放到熟悉的聊天界面里。配置后会在后台自动运行。</p>
+                </details>
+            </div>
+            <div class="faq-col">
+                <details class="faq-item">
+                    <summary>
+                        <span>需要我一直开着电脑吗？</span>
+                        <span class="faq-chevron" aria-hidden="true">›</span>
+                    </summary>
+                    <p>macOS 上通过 launchd 实现开机自启，Telegram Bot 和每日日报都在后台自动运行，不需要保持终端开启。</p>
+                </details>
+                <details class="faq-item">
+                    <summary>
+                        <span>它支持哪些大模型？</span>
+                        <span class="faq-chevron" aria-hidden="true">›</span>
+                    </summary>
+                    <p>支持任何 OpenAI 兼容接口（DeepSeek、学校超算集群等），也支持 Anthropic Claude 系列。</p>
+                </details>
+                <details class="faq-item">
+                    <summary>
+                        <span>为什么比自己开很多网页更省事？</span>
+                        <span class="faq-chevron" aria-hidden="true">›</span>
+                    </summary>
+                    <p>它会替你决定去哪查、怎么查、结果怎么排优先级。你只保留「我要什么」，中间跳转都被折叠掉了。</p>
+                </details>
+            </div>
         </div>
     </section>
 
