@@ -617,6 +617,19 @@ if __name__ == "__main__":
     print(f"✅ @{me.username} 已启动")
     print(f"   白名单：{ALLOWED_IDS or '(未设置)'}")
 
+    # ── 启动上线通知 ──────────────────────────────────────────────────────────
+    if ALLOWED_IDS:
+        startup_time = _dt.datetime.now().strftime("%H:%M")
+        startup_text = (
+            f"✅ <b>SJTU Agent 已上线</b>  {startup_time}\n"
+            f"直接发消息开始对话，或输入 /help 查看命令。"
+        )
+        for _uid in ALLOWED_IDS:
+            try:
+                bot.send_message(_uid, startup_text, parse_mode="HTML")
+            except Exception as _e:
+                print(f"[WARN] 上线通知发送失败 uid={_uid}: {_e}")
+
     # 向 Telegram 服务器注册命令列表，用户输入 / 时会弹出自动补全菜单
     from telebot.types import BotCommand
     bot.set_my_commands([
