@@ -3512,12 +3512,29 @@ def _test_llm_connection_simple(base_url: str, api_key: str, model: str) -> tupl
 def setup_agent_config() -> dict:
     print("\n=== SJTU DDL Agent 首次配置 ===")
     print("请填写用于驱动 Agent 的大模型 API 信息")
-    print("（支持 DeepSeek、学校超算集群等任意 OpenAI 兼容接口）\n")
+    print("（支持 DeepSeek、学校超算集群等任意 OpenAI 兼容接口）")
+    print("输入 quit / skip 可跳过配置直接进入 Agent（功能受限）\n")
+
+    def _prompt(msg: str) -> str:
+        """带退出检测的 input，Ctrl+C / EOF / quit / skip 均触发跳出。"""
+        try:
+            val = input(msg).strip()
+        except (EOFError, KeyboardInterrupt):
+            raise SystemExit(0)
+        if val.lower() in ("quit", "exit", "skip", "q"):
+            raise SystemExit(0)
+        return val
 
     while True:
-        base_url = input("API Base URL（如 https://api.openai.com/v1，回车使用 OpenAI 官方）: ").strip()
-        api_key  = input("API Key: ").strip()
-        model    = input("模型名称（如 deepseek-chat，回车默认 deepseek-chat）: ").strip() or "deepseek-chat"
+        try:
+            base_url = _prompt("API Base URL（如 https://api.openai.com/v1，回车使用 OpenAI 官方）: ")
+            api_key  = _prompt("API Key: ")
+            model    = _prompt("模型名称（如 deepseek-chat，回车默认 deepseek-chat）: ") or "deepseek-chat"
+        except SystemExit:
+            print("\n已跳过 API 配置。部分依赖 LLM 的功能将不可用。")
+            print("你可以后续运行 sjtu-agent setup 补充配置，或使用 /model 命令修改。\n")
+            # 返回一个"空"配置，让 chat_loop 仍可启动（工具调用不受影响）
+            return {"base_url": "", "api_key": "", "model": "deepseek-chat"}
 
         resolved_url = base_url or "https://api.openai.com/v1"
         print("正在测试 API 连接，请稍候…", end="", flush=True)
@@ -3526,7 +3543,7 @@ def setup_agent_config() -> dict:
             print(" ✅ 连接成功")
             break
         print(f"\n⚠️  连接测试失败：{err_msg}")
-        print("请重新输入（直接回车可重用上次输入的值）\n")
+        print("请重新输入（直接回车可重用上次输入的值；输入 quit 可跳过配置）\n")
 
     cfg = {
         "base_url": resolved_url,

@@ -565,7 +565,12 @@ class SetupConversation:
         return False
 
     def prompt(self) -> str:
-        return input("You: ").strip()
+        try:
+            return input("You: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            self.quit_setup()
+            raise SystemExit(0)
 
     def show_status(self, status: dict) -> None:
         self.say("这是当前的 setup 体检结果。")
