@@ -198,9 +198,9 @@ def _apply_agent_config_updates(updates: dict[str, str]) -> dict[str, str] | Non
 
     current = agent.load_agent_config()
     saved = {
-        "base_url": updates["base_url"] or current.get("base_url") or "https://api.openai.com/v1",
+        "base_url": updates["base_url"] or current.get("base_url") or "https://models.sjtu.edu.cn/api/v1",
         "api_key": updates["api_key"] or current.get("api_key") or "",
-        "model": updates["model"] or current.get("model") or "gpt-4.1-mini",
+        "model": updates["model"] or current.get("model") or "deepseek-chat",
     }
     AGENT_CONFIG_PATH.write_text(json.dumps(saved, indent=2, ensure_ascii=False), encoding="utf-8")
     return saved

@@ -3517,7 +3517,7 @@ def setup_agent_config() -> dict:
     while True:
         base_url = input("API Base URL（如 https://api.openai.com/v1，回车使用 OpenAI 官方）: ").strip()
         api_key  = input("API Key: ").strip()
-        model    = input("模型名称（如 gpt-4.1-mini，回车默认 gpt-4.1-mini）: ").strip() or "gpt-4.1-mini"
+        model    = input("模型名称（如 deepseek-chat，回车默认 deepseek-chat）: ").strip() or "deepseek-chat"
 
         resolved_url = base_url or "https://api.openai.com/v1"
         print("正在测试 API 连接，请稍候…", end="", flush=True)
