@@ -1810,6 +1810,12 @@ def _setup_shuiyuan_session(cfg: dict, username: str, password: str) -> dict:
         from playwright.sync_api import sync_playwright as _sync_pw
     except ImportError:
         return _shuiyuan_session_error("未安装 playwright")
+
+    try:
+        import login as login_module
+    except Exception as e:
+        return _shuiyuan_session_error(f"加载登录模块失败：{e}")
+
     jaccount_cookies = cfg.get("jaccount_cookies", {})
 
     new_session: dict = {}
@@ -1831,10 +1837,13 @@ def _setup_shuiyuan_session(cfg: dict, username: str, password: str) -> dict:
                 browser.close()
                 return {"error": "需要 jAccount 凭据，请先用 save_credentials 配置"}
             try:
-                page.fill("input[name='user']", username)
-                page.fill("input[name='pass']", password)
-                page.click("input[type='submit']")
-                page.wait_for_url("**/shuiyuan.sjtu.edu.cn/**", timeout=20_000)
+                if not login_module._fill_jaccount(page, username, password):
+                    browser.close()
+                    return _shuiyuan_session_error("jAccount 登录失败，请检查账号密码")
+                try:
+                    page.wait_for_url("**/shuiyuan.sjtu.edu.cn/**", timeout=15_000)
+                except Exception:
+                    pass
                 new_ja = {c["name"]: c["value"] for c in ctx.cookies()
                           if "jaccount" in c.get("domain", "")}
                 if new_ja:
