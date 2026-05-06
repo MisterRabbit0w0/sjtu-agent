@@ -438,6 +438,7 @@ def handle_document(msg):
             # 2. 构造传给 agent 的用户消息：告知文件已保存到本地路径
             suffix = local_path.suffix.lower()
             extra_context = ""
+            extract_error = ""
             if suffix == ".pdf":
                 # 尝试提取前 4000 字符供 agent 直接阅读
                 try:
@@ -448,16 +449,28 @@ def handle_document(msg):
                             f"\n\n以下是 PDF 前几页提取的文字内容供参考：\n"
                             f"```\n{extracted[:3000]}\n```"
                         )
-                except Exception:
-                    pass
+                    else:
+                        extract_error = result.get("error", "")
+                except Exception as ex:
+                    extract_error = str(ex)
 
+            # 3. 构建系统消息，明确告知 agent 文件已就绪、无需再让用户重发
+            file_size_kb = local_path.stat().st_size // 1024
             user_text = (
-                f"[用户通过 Telegram 发送了文件：{filename}]\n"
-                f"文件已保存到本地路径：{local_path}\n"
-                f"文件大小：{local_path.stat().st_size // 1024} KB"
-                + extra_context
-                + (f"\n\n用户说：{caption}" if caption else "\n\n（用户未附加说明，请询问需要对这个文件做什么）")
+                f"[用户通过 Telegram 上传了文件，文件已自动下载到本机]\n"
+                f"  文件名：{filename}\n"
+                f"  本地路径：{local_path}  （此路径真实有效，可直接传给工具使用）\n"
+                f"  文件大小：{file_size_kb} KB"
             )
+            if extra_context:
+                user_text += extra_context
+            elif extract_error:
+                user_text += f"\n\n  （PDF 文本提取失败：{extract_error}；可用 read_assignment_file 工具重新尝试读取）"
+            elif suffix == ".pdf":
+                user_text += f"\n\n  （可用 read_assignment_file 工具读取 PDF 内容）"
+
+            user_text += "\n\n⚠️ 注意：文件已在本机就绪，不要让用户重新发路径或重新上传，直接处理即可。"
+            user_text += f"\n\n用户说：{caption}" if caption else "\n\n（用户未附加说明，请询问需要对这个文件做什么）"
 
             with lock:
                 reply = _capture_turn(sess, user_text)
