@@ -316,7 +316,7 @@ def fetch_aihaoke(cfg: dict) -> list[dict]:
 
     # 优先使用 config.json 中用户自定义的课程列表；
     # 未配置时自动从 aihaoke API 获取用户实际选修课程；
-    # API 也不可用时最终回退到硬编码默认列表。
+    # API 不可用时返回空列表——不使用硬编码默认列表，避免向没有对应课程的用户推送错误提醒。
     courses = cfg.get("aihaoke_courses")
     if not courses:
         print("[aihaoke] 正在自动获取选修课程列表…")
@@ -324,8 +324,8 @@ def fetch_aihaoke(cfg: dict) -> list[dict]:
         if courses:
             print(f"[aihaoke] ✓ 获取到 {len(courses)} 门课程：{[c['name'] for c in courses]}")
         else:
-            print("[aihaoke] ⚠ 无法自动获取课程列表，回退到内置默认列表")
-            courses = AIHAOKE_COURSES
+            print("[aihaoke] ⚠ 无法自动获取课程列表，跳过 aihaoke DDL 检查")
+            return []
 
     if not courses:
         print("[aihaoke] ⚠ 课程列表为空，跳过")
@@ -1363,9 +1363,21 @@ def download_aihaoke_assignments(
 
         page = ctx.new_page()
 
-        for course in AIHAOKE_COURSES:
+        # 优先使用用户实际选修课程；API 不可用时跳过，不使用硬编码列表
+        token = raw_cookies.get("haoke-token", "")
+        enrolled = cfg.get("aihaoke_courses") or (
+            _fetch_aihaoke_enrolled_courses({
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+            }) if token else None
+        )
+        if not enrolled:
+            browser.close()
+            return [{"error": "无法获取 aihaoke 选修课程列表，跳过下载"}]
+
+        for course in enrolled:
             cid   = course["courseId"]
-            iid   = course["instanceId"]
+            iid   = course.get("instanceId", cid)
             cname = course["name"]
 
             list_url = (
