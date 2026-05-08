@@ -270,7 +270,9 @@ def _get_chat_client():
     - claude 模型 → Anthropic SDK（带 claude-cli UA，兼容中转代理）
     - 其他模型   → OpenAI SDK
     """
-    sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+    _project_root = str(Path(__file__).resolve().parent.parent.parent)
+    if _project_root not in sys.path:
+        sys.path.insert(0, _project_root)
     import agent as _agent
 
     agent_cfg = _agent.load_agent_config()
@@ -294,7 +296,9 @@ def _stream_chat(user_message: str):
     global _chat_history
 
     # 延迟导入 agent 模块（避免循环依赖 + 启动时间）
-    sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+    _project_root = str(Path(__file__).resolve().parent.parent.parent)
+    if _project_root not in sys.path:
+        sys.path.insert(0, _project_root)
     import agent as _agent
 
     if not _chat_history:

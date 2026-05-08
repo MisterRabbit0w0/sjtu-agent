@@ -164,33 +164,49 @@ def fetch_canvas(cfg: dict) -> list[dict]:
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
 
     # 2. 拉取近期作业，并用 /students/submissions 批量核查个人提交状态。
-    # Canvas bucket=upcoming 会在截止时间一过就隐藏未提交作业；这里保留今天
-    # 已过期但未提交的作业，让当天 DDL 不会从 Agent 里直接消失。
+    # Canvas bucket=upcoming 会在截止时间一过就隐藏未提交作业；这里额外用
+    # bucket=past + 今日过滤来保留当天已过期但未提交的作业。
     # （include[]=submission 在 SJTU Canvas 有 bug，数据不准确）
     for course in courses:
         cid = course["id"]
         cname = course.get("name", f"课程{cid}")
 
-        # 2a. 拉取作业列表
+        # 2a. 拉取作业列表：upcoming + 今日已过期
         pending: list[dict] = []
-        asgn_url: str | None = f"{base}/api/v1/courses/{cid}/assignments"
-        asgn_params: dict = {"per_page": 100, "order_by": "due_at"}
-        while asgn_url:
-            try:
-                r = session.get(asgn_url, params=asgn_params, timeout=15)
-                r.raise_for_status()
-            except requests.RequestException as e:
-                print(f"[Canvas] 获取 {cname} 作业失败：{e}")
-                break
-            for a in r.json():
-                if not a.get("submission_types"):
-                    continue
-                due = parse_dt(a.get("due_at", ""))
-                if not due or due < today_start:
-                    continue
-                pending.append({"id": a["id"], "name": a.get("name", "未知作业"), "due": due})
-            asgn_url = r.links.get("next", {}).get("url")
-            asgn_params = {}
+        seen_ids: set[int] = set()
+        queries: list[dict] = [
+            {"bucket": "upcoming", "per_page": 50, "order_by": "due_at"},
+            {"bucket": "past", "per_page": 50, "order_by": "due_at"},
+        ]
+        for asgn_params in queries:
+            asgn_url: str | None = f"{base}/api/v1/courses/{cid}/assignments"
+            is_past = asgn_params.get("bucket") == "past"
+            while asgn_url:
+                try:
+                    r = session.get(asgn_url, params=asgn_params, timeout=15)
+                    r.raise_for_status()
+                except requests.RequestException as e:
+                    print(f"[Canvas] 获取 {cname} 作业失败：{e}")
+                    break
+                page_data = r.json()
+                stop_past = False
+                for a in page_data:
+                    if not a.get("submission_types"):
+                        continue
+                    due = parse_dt(a.get("due_at", ""))
+                    if not due or due < today_start:
+                        if is_past:
+                            stop_past = True
+                        continue
+                    aid = a["id"]
+                    if aid in seen_ids:
+                        continue
+                    seen_ids.add(aid)
+                    pending.append({"id": aid, "name": a.get("name", "未知作业"), "due": due})
+                if stop_past:
+                    break
+                asgn_url = r.links.get("next", {}).get("url")
+                asgn_params = {}
 
         if not pending:
             continue
