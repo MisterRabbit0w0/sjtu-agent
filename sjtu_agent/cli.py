@@ -279,6 +279,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     install_daemons_parser.add_argument(
         "--write-only",
+        "--write-daemons-only",
         action="store_true",
         help="only write service files; do not load/register them",
     )
@@ -342,7 +343,11 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
-    args = parser.parse_args(argv)
+    args, unknown = parser.parse_known_args(argv)
+    if unknown and hasattr(args, "script_args"):
+        args.script_args = [*unknown, *args.script_args]
+    elif unknown:
+        parser.error(f"unrecognized arguments: {' '.join(unknown)}")
     if not getattr(args, "command", None):
         return _cmd_chat(argparse.Namespace(script_args=[]))
     return args.func(args)

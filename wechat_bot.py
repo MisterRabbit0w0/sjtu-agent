@@ -225,10 +225,13 @@ def _get_or_create_session() -> dict:
     with _sess_lock:
         if not _sess:
             agent_cfg = agent.load_agent_config()
+            llm_configs = agent.get_llm_configs(agent_cfg)
+            primary_cfg = llm_configs[0]
             _sess.update({
                 "messages":   [],
-                "model_box":  [agent_cfg["model"]],
-                "client_box": [agent._make_client(agent_cfg)],
+                "model_box":  [primary_cfg["model"]],
+                "client_box": [agent._make_client(primary_cfg)],
+                "fallback_configs": llm_configs[1:],
             })
     return _sess
 
@@ -281,6 +284,7 @@ def _capture_turn(sess: dict, user_text: str) -> str:
             sess["client_box"][0],
             sess["model_box"][0],
             sess["messages"],
+            sess.get("fallback_configs"),
         )
     finally:
         sys.stdout = old_stdout

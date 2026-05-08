@@ -34,7 +34,18 @@ DOMAINS = {
     },
     "icourse": {
         "domain": "icourse163.org",
-        "keys": ["NTESSTUDYSI", "STUDY_LIVE_LOGIN_INFO", "ux", "p_h5_u", "videoStudyUrl"],
+        "keys": [
+            "NTESSTUDYSI",
+            "STUDY_SESS",
+            "STUDY_PERSIST",
+            "STUDY_INFO",
+            "NTES_YD_SESS",
+            "NTES_YD_PASSPORT",
+            "STUDY_LIVE_LOGIN_INFO",
+            "ux",
+            "p_h5_u",
+            "videoStudyUrl",
+        ],
     },
 }
 

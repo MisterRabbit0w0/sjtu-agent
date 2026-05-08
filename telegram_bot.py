@@ -61,10 +61,13 @@ _locks:    dict[int, threading.Lock] = {}
 def _get_session(chat_id: int) -> dict:
     if chat_id not in _sessions:
         agent_cfg = agent.load_agent_config()
+        llm_configs = agent.get_llm_configs(agent_cfg)
+        primary_cfg = llm_configs[0]
         _sessions[chat_id] = {
             "messages":   [],
-            "model_box":  [agent_cfg["model"]],
-            "client_box": [agent._make_client(agent_cfg)],
+            "model_box":  [primary_cfg["model"]],
+            "client_box": [agent._make_client(primary_cfg)],
+            "fallback_configs": llm_configs[1:],
         }
         _locks[chat_id] = threading.Lock()
     return _sessions[chat_id]
@@ -137,6 +140,7 @@ def _capture_turn(sess: dict, user_text: str, on_tool_result=None) -> str:
             sess["client_box"][0],
             sess["model_box"][0],
             sess["messages"],
+            sess.get("fallback_configs"),
         )
     finally:
         sys.stdout = old_stdout
@@ -895,6 +899,7 @@ def _capture_turn_multimodal(sess: dict, content: list) -> str:
             sess["client_box"][0],
             sess["model_box"][0],
             sess["messages"],
+            sess.get("fallback_configs"),
         )
     finally:
         sys.stdout = old_stdout

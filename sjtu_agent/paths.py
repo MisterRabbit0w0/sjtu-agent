@@ -30,6 +30,7 @@ LOG_DIR = DATA_DIR / "logs"
 ENV_PATH = DATA_DIR / ".env"
 CONFIG_PATH = DATA_DIR / "config.json"
 AGENT_CONFIG_PATH = DATA_DIR / "agent_config.json"
+PROVIDERS_CONFIG_PATH = DATA_DIR / "llm_providers.json"
 REMINDERS_PATH = DATA_DIR / "reminders.json"
 REMIND_STATE_PATH = DATA_DIR / "remind_state.json"
 MYSJTU_CATALOG_PATH = DATA_DIR / "mysjtu_catalog.json"
@@ -111,6 +112,7 @@ def ensure_runtime_layout() -> None:
         ".env": PROJECT_ROOT / ".env",
         "config.json": PROJECT_ROOT / "config.json",
         "agent_config.json": PROJECT_ROOT / "agent_config.json",
+        "llm_providers.json": PROJECT_ROOT / "llm_providers.json",
         "reminders.json": PROJECT_ROOT / "reminders.json",
         "remind_state.json": PROJECT_ROOT / "remind_state.json",
         "mysjtu_catalog.json": PROJECT_ROOT / "mysjtu_catalog.json",
@@ -134,6 +136,7 @@ def describe_runtime_paths() -> dict[str, str]:
         "config_path": str(CONFIG_PATH),
         "env_path": str(ENV_PATH),
         "agent_config_path": str(AGENT_CONFIG_PATH),
+        "providers_config_path": str(PROVIDERS_CONFIG_PATH),
         "reminders_path": str(REMINDERS_PATH),
         "mysjtu_catalog_path": str(MYSJTU_CATALOG_PATH),
         "schedule_cache_path": str(SCHEDULE_CACHE_PATH),

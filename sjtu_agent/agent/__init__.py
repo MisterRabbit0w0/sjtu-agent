@@ -21,6 +21,8 @@ from sjtu_agent.agent.runner import (
     _stream_with_think_tags, _ANSI_OK,
 )
 from sjtu_agent.agent.chat_loop import (
-    load_agent_config, setup_agent_config, chat_loop, main,
+    load_agent_config, save_agent_config, get_llm_configs,
+    load_providers_config, save_providers_config,
+    setup_agent_config, chat_loop, main,
     _prefetch_ddls_background, _check_for_updates, _UPDATE_AVAILABLE,
 )
