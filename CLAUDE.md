@@ -39,7 +39,7 @@ sjtu-agent news-digest    # 智能新闻日报
 
 ## Testing
 
-项目目前没有测试套件。验证改动：`sjtu-agent doctor` 检查配置状态，`sjtu-agent daily-report --test` 测试日报，`sjtu-agent telegram-bot --test` 测试 Token 连通性。
+项目已有少量测试（例如 `tests/test_config.py`），覆盖仍有限。运行现有测试：`pytest`；日常验证可配合 `sjtu-agent doctor`、`sjtu-agent daily-report --test`、`sjtu-agent telegram-bot --test`。
 
 ## Architecture
 

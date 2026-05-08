@@ -42,6 +42,12 @@ PRESETS = {
         "model": "gpt-4o-mini",
         "env_key": "OPENAI_API_KEY",
     },
+    "deepseek": {
+        "label": "DeepSeek",
+        "base_url": "https://api.deepseek.com/v1",
+        "model": "deepseek-chat",
+        "env_key": "DEEPSEEK_API_KEY",
+    },
     "anthropic": {
         "label": "Anthropic (Claude)",
         "base_url": "https://api.anthropic.com",

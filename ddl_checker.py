@@ -194,7 +194,9 @@ def fetch_canvas(cfg: dict) -> list[dict]:
                     if not a.get("submission_types"):
                         continue
                     due = parse_dt(a.get("due_at", ""))
-                    if not due or due < today_start:
+                    if not due:
+                        continue
+                    if due < today_start:
                         if is_past:
                             stop_past = True
                         continue
@@ -607,6 +609,9 @@ def refresh_aihaoke_cookies(cfg: dict) -> tuple[bool, str]:
                 },
                 timeout=15,
             )
+            if resp.status_code in (401, 403):
+                return False
+            resp.raise_for_status()
             data = resp.json()
         except Exception:
             return False
@@ -616,7 +621,7 @@ def refresh_aihaoke_cookies(cfg: dict) -> tuple[bool, str]:
         if not isinstance(payload, dict):
             return False
         rows = payload.get("teachClassResponseList")
-        return isinstance(rows, list) and len(rows) > 0
+        return isinstance(rows, list)
 
     def _collect_cookies(ctx) -> dict[str, str]:
         return {

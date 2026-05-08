@@ -687,6 +687,7 @@
           <label>API 提供商</label>
           <select id="provider">
             <option value="zhiyuan">致远一号（交大官方 · 推荐）</option>
+            <option value="deepseek">DeepSeek</option>
             <option value="openai">OpenAI</option>
             <option value="anthropic">Anthropic (Claude)</option>
             <option value="custom">自定义</option>
@@ -916,6 +917,7 @@ document.querySelectorAll('.nav-item').forEach(el => {
 // ── Provider presets ─────────────────────────────────────────────────────────
 const PRESETS = {
   zhiyuan:   { base_url: 'https://models.sjtu.edu.cn/api/v1', model: 'deepseek-chat' },
+  deepseek:  { base_url: 'https://api.deepseek.com/v1', model: 'deepseek-chat' },
   openai:    { base_url: 'https://api.openai.com/v1', model: 'gpt-4o-mini' },
   anthropic: { base_url: 'https://api.anthropic.com', model: 'claude-sonnet-4-5' },
   custom:    { base_url: '', model: '' },
