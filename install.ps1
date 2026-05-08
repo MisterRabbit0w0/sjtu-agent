@@ -190,13 +190,27 @@ if ($CurrentUserPath -notlike "*$VenvScripts*") {
 if (-not $NoSetup) {
     Write-Log "Launching sjtu-agent setup"
     & $VenvPython -m sjtu_agent setup
-    exit $LASTEXITCODE
+    $SetupExit = $LASTEXITCODE
+    Write-Host ""
+    Write-Host "=========================================="
+    Write-Host "If 'sjtu-agent' is not recognized in a new terminal,"
+    Write-Host "please close and reopen PowerShell so the PATH update takes effect."
+    Write-Host "You can also run directly without PATH:"
+    Write-Host "  $VenvPython -m sjtu_agent"
+    Write-Host "  $VenvPython -m sjtu_agent web"
+    Write-Host "=========================================="
+    exit $SetupExit
 }
 
 Write-Host ""
 Write-Host "Installation complete."
 Write-Host ""
-Write-Host "You can now run sjtu-agent directly (no need to activate the venv):"
+Write-Host "IMPORTANT: If 'sjtu-agent' is not recognized, close and reopen PowerShell."
+Write-Host "You can also run directly without PATH:"
+Write-Host "  $VenvPython -m sjtu_agent"
+Write-Host "  $VenvPython -m sjtu_agent web"
+Write-Host ""
+Write-Host "Or after reopening a terminal:"
 Write-Host "  sjtu-agent"
 Write-Host "  sjtu-agent setup"
 Write-Host "  sjtu-agent update"
