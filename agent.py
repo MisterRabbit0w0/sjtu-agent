@@ -7,12 +7,8 @@ agent.py — 向后兼容入口（实际逻辑已迁移到 sjtu_agent/agent/）
 import sys
 from pathlib import Path
 
-if sys.platform == "win32":
-    try:
-        sys.stdout.reconfigure(errors="replace")
-        sys.stderr.reconfigure(errors="replace")
-    except Exception:
-        pass
+from sjtu_agent.compat import fix_windows_encoding
+fix_windows_encoding()
 
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))

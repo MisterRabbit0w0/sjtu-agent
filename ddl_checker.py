@@ -26,12 +26,8 @@ import urllib.parse
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
-if sys.platform == "win32":
-    try:
-        sys.stdout.reconfigure(errors="replace")
-        sys.stderr.reconfigure(errors="replace")
-    except Exception:
-        pass
+from sjtu_agent.compat import fix_windows_encoding
+fix_windows_encoding()
 
 import requests
 from bs4 import BeautifulSoup

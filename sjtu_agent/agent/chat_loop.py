@@ -423,6 +423,9 @@ def _list_provider_models(cfg: dict) -> tuple[list[str], str]:
     last_error = ""
     try:
         import requests as _req
+    except ImportError:
+        return [], "需要安装 requests 库才能列出模型：pip install requests"
+    try:
         payload = None
         for url in urls:
             try:

@@ -226,6 +226,8 @@ def _get_or_create_session() -> dict:
         if not _sess:
             agent_cfg = agent.load_agent_config()
             llm_configs = agent.get_llm_configs(agent_cfg)
+            if not llm_configs:
+                llm_configs = [agent_cfg]
             primary_cfg = llm_configs[0]
             _sess.update({
                 "messages":   [],

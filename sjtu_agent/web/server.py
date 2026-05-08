@@ -20,12 +20,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
 
-if sys.platform == "win32":
-    try:
-        sys.stdout.reconfigure(errors="replace")
-        sys.stderr.reconfigure(errors="replace")
-    except Exception:
-        pass
+from sjtu_agent.compat import fix_windows_encoding
+fix_windows_encoding()
 
 from sjtu_agent.paths import ENV_PATH, CONFIG_PATH, AGENT_CONFIG_PATH
 

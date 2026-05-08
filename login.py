@@ -30,13 +30,8 @@ from pathlib import Path
 
 import requests
 from sjtu_agent.paths import CONFIG_PATH, ENV_PATH
-
-if sys.platform == "win32":
-    try:
-        sys.stdout.reconfigure(errors="replace")
-        sys.stderr.reconfigure(errors="replace")
-    except Exception:
-        pass
+from sjtu_agent.compat import fix_windows_encoding
+fix_windows_encoding()
 
 try:
     from dotenv import load_dotenv
