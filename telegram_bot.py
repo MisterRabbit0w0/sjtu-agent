@@ -294,6 +294,8 @@ def _streamed_turn(sess: dict, user_text: str, on_progress, on_tool_result=None)
 
     for _round in range(MAX_ROUNDS):
         text_so_far = ""
+        full_reasoning = ""
+        has_native_reasoning = False
         tool_calls_map: dict[int, dict] = {}
 
         stream = client.chat.completions.create(
@@ -308,6 +310,10 @@ def _streamed_turn(sess: dict, user_text: str, on_progress, on_tool_result=None)
             if not chunk.choices:
                 continue
             delta = chunk.choices[0].delta
+            rc = agent._delta_reasoning_content(delta)
+            if rc:
+                has_native_reasoning = True
+                full_reasoning += rc
             if delta.content:
                 text_so_far += delta.content
                 full_text += delta.content
@@ -326,28 +332,29 @@ def _streamed_turn(sess: dict, user_text: str, on_progress, on_tool_result=None)
                             tool_calls_map[idx]["arguments"] += tc.function.arguments
 
         if not tool_calls_map:
-            sess["messages"].append({"role": "assistant", "content": text_so_far})
+            assistant_msg = {"role": "assistant", "content": text_so_far}
+            if has_native_reasoning and full_reasoning:
+                assistant_msg["reasoning_content"] = full_reasoning
+            sess["messages"].append(assistant_msg)
             return full_text
-
-        from openai.types.chat import ChatCompletionMessageToolCall, ChatCompletionMessage
-        from openai.types.chat.chat_completion_message_tool_call import Function
 
         tc_objs = []
         for idx in sorted(tool_calls_map):
             e = tool_calls_map[idx]
-            tc_objs.append(ChatCompletionMessageToolCall(
-                id=e["id"], type="function",
-                function=Function(name=e["name"], arguments=e["arguments"]),
-            ))
-        assistant_msg = ChatCompletionMessage(
-            role="assistant", content=text_so_far or None, tool_calls=tc_objs,
-        )
+            tc_objs.append({
+                "id": e["id"],
+                "type": "function",
+                "function": {"name": e["name"], "arguments": e["arguments"]},
+            })
+        assistant_msg = {"role": "assistant", "content": text_so_far or None, "tool_calls": tc_objs}
+        if has_native_reasoning and full_reasoning:
+            assistant_msg["reasoning_content"] = full_reasoning
         messages.append(assistant_msg)
         sess["messages"].append(assistant_msg)
 
         for tc in tc_objs:
-            fn_name = tc.function.name
-            try: fn_args = _json.loads(tc.function.arguments or "{}")
+            fn_name = tc["function"]["name"]
+            try: fn_args = _json.loads(tc["function"].get("arguments") or "{}")
             except Exception: fn_args = {}
             try: on_progress("tool_start", {"name": fn_name})
             except Exception: pass
@@ -359,7 +366,7 @@ def _streamed_turn(sess: dict, user_text: str, on_progress, on_tool_result=None)
             if on_tool_result:
                 try: on_tool_result(fn_name, fn_args, result)
                 except Exception: pass
-            tool_msg = {"role": "tool", "tool_call_id": tc.id, "content": result}
+            tool_msg = {"role": "tool", "tool_call_id": tc["id"], "content": result}
             messages.append(tool_msg)
             sess["messages"].append(tool_msg)
 

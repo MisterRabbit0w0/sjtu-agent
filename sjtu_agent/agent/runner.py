@@ -151,6 +151,54 @@ def _anthropic_tools() -> list:
     return result
 
 
+def _delta_reasoning_content(delta) -> str:
+    """Return provider-specific reasoning text from an OpenAI-compatible delta.
+
+    Some gateways expose custom fields as attributes; others keep them in
+    ``model_extra`` / ``model_dump()`` so plain ``getattr`` silently misses them.
+    """
+    keys = ("reasoning_content", "reasoning")
+
+    def _text(value) -> str:
+        if value is None:
+            return ""
+        if isinstance(value, str):
+            return value
+        return str(value) if value else ""
+
+    if isinstance(delta, dict):
+        for key in keys:
+            value = _text(delta.get(key))
+            if value:
+                return value
+
+    for key in keys:
+        value = _text(getattr(delta, key, None))
+        if value:
+            return value
+
+    extra = getattr(delta, "model_extra", None)
+    if isinstance(extra, dict):
+        for key in keys:
+            value = _text(extra.get(key))
+            if value:
+                return value
+
+    dump = None
+    if hasattr(delta, "model_dump"):
+        try:
+            dump = delta.model_dump()
+        except Exception:
+            dump = None
+    if isinstance(dump, dict):
+        for key in keys:
+            value = _text(dump.get(key))
+            if value:
+                return value
+
+    return ""
+
+
 def _stream_with_think_tags(stream, spinner: "Spinner") -> tuple[str, str, dict, bool]:
     """
     消费 OpenAI 兼容的流式响应，处理两种思考格式：
@@ -163,7 +211,7 @@ def _stream_with_think_tags(stream, spinner: "Spinner") -> tuple[str, str, dict,
     关键：在开始写思考文字前先停 Spinner，思考结束后重启 Spinner 等待正文。
     这样消除了 Spinner 的 \\r 和 write() 并发竞争导致的闪烁。
 
-    返回：(full_content_no_think, full_reasoning, tool_calls_map)
+    返回：(full_content_no_think, full_reasoning, tool_calls_map, has_native_reasoning)
     """
     full_content   = ""   # 包含 <think> 的原始正文（用于存入 messages）
     full_reasoning = ""   # 思考内容（展示并收集）
@@ -206,7 +254,7 @@ def _stream_with_think_tags(stream, spinner: "Spinner") -> tuple[str, str, dict,
             continue
 
         # ── reasoning_content 字段（DeepSeek-R1 / Qwen 原生）────────────
-        rc = getattr(delta, "reasoning_content", None) or ""
+        rc = _delta_reasoning_content(delta)
         if rc:
             has_native_reasoning = True
             _start_thinking()

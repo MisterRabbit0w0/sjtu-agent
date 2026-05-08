@@ -19,7 +19,7 @@ from sjtu_agent.agent import (  # noqa: F401
     SYSTEM_PROMPT, _TOOL_LABELS, TOOLS, run_tool,
     Spinner, _make_client, _is_anthropic_model, _anthropic_tools,
     _run_one_turn, _run_one_turn_openai, _run_one_turn_anthropic,
-    _stream_with_think_tags, _ANSI_OK,
+    _stream_with_think_tags, _delta_reasoning_content, _ANSI_OK,
     load_agent_config, save_agent_config, get_llm_configs,
     load_providers_config, save_providers_config,
     setup_agent_config, chat_loop, main,

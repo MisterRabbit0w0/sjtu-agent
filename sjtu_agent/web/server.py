@@ -451,7 +451,7 @@ def _stream_chat_openai(client, model, _agent, max_rounds, _sse):
                 if not chunk.choices:
                     continue
                 delta = chunk.choices[0].delta
-                rc = getattr(delta, "reasoning_content", None) or ""
+                rc = _agent._delta_reasoning_content(delta)
                 if rc:
                     has_native_reasoning = True
                     full_reasoning += rc
