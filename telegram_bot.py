@@ -57,8 +57,14 @@ bot = telebot.TeleBot(BOT_TOKEN)
 _sessions: dict[int, dict] = {}
 _locks:    dict[int, threading.Lock] = {}
 
+_CONFIG_ERROR_MESSAGE = "LLM 未配置：缺少 api_key，请先运行 sjtu-agent setup"
+
 
 def _get_session(chat_id: int) -> dict:
+    if chat_id not in _locks:
+        _locks[chat_id] = threading.Lock()
+    if _sessions.get(chat_id, {}).get("config_error"):
+        _sessions.pop(chat_id, None)
     if chat_id not in _sessions:
         agent_cfg = agent.load_agent_config()
         llm_configs = agent.get_llm_configs(agent_cfg)
@@ -67,15 +73,23 @@ def _get_session(chat_id: int) -> dict:
         primary_cfg = llm_configs[0]
         model = primary_cfg.get("model", "deepseek-chat")
         if not primary_cfg.get("api_key"):
-            raise RuntimeError("LLM 未配置：缺少 api_key，请先运行 sjtu-agent setup")
+            _sessions[chat_id] = {"messages": [], "config_error": _CONFIG_ERROR_MESSAGE}
+            return _sessions[chat_id]
         _sessions[chat_id] = {
             "messages":   [],
             "model_box":  [model],
             "client_box": [agent._make_client(primary_cfg)],
             "fallback_configs": llm_configs[1:],
         }
-        _locks[chat_id] = threading.Lock()
     return _sessions[chat_id]
+
+
+def _send_config_error(chat_id: int, sess: dict) -> bool:
+    err = sess.get("config_error")
+    if not err:
+        return False
+    bot.send_message(chat_id, f"⚙️ {err}")
+    return True
 
 
 _TG_CTX = (
@@ -935,6 +949,8 @@ def _capture_turn_multimodal(sess: dict, content: list) -> str:
 def _run_with_typing(chat_id: int, lock, fn):
     """在 typing 动作下运行 fn()，统一处理异常并发送结果。"""
     sess = _get_session(chat_id)
+    if _send_config_error(chat_id, sess):
+        return
     if lock.locked():
         bot.send_message(chat_id, "⏳ 上一条消息还在处理中，请稍候…")
         return
@@ -964,7 +980,10 @@ def handle_document(msg):
     caption  = (msg.caption or "").strip()
     filename = doc.file_name or f"file_{doc.file_id[:8]}"
 
-    lock = _locks.get(chat_id) or _get_session(chat_id) and _locks[chat_id]
+    sess = _get_session(chat_id)
+    if _send_config_error(chat_id, sess):
+        return
+    lock = _locks[chat_id]
     if lock.locked():
         bot.reply_to(msg, "⏳ 上一条消息还在处理中，请稍候…")
         return
@@ -973,6 +992,8 @@ def handle_document(msg):
 
     def run():
         sess = _get_session(chat_id)
+        if _send_config_error(chat_id, sess):
+            return
         stop_typing = threading.Event()
         threading.Thread(target=_keep_typing, args=(chat_id, stop_typing), daemon=True).start()
         try:
@@ -1038,7 +1059,10 @@ def handle_photo(msg):
     caption = (msg.caption or "").strip()
     # 取最高分辨率（photos[-1]）
     photo   = msg.photo[-1]
-    lock = _locks.get(chat_id) or _get_session(chat_id) and _locks[chat_id]
+    sess = _get_session(chat_id)
+    if _send_config_error(chat_id, sess):
+        return
+    lock = _locks[chat_id]
     if lock.locked():
         bot.reply_to(msg, "⏳ 上一条消息还在处理中，请稍候…")
         return
@@ -1047,6 +1071,8 @@ def handle_photo(msg):
 
     def run():
         sess = _get_session(chat_id)
+        if _send_config_error(chat_id, sess):
+            return
         stop_typing = threading.Event()
         threading.Thread(target=_keep_typing, args=(chat_id, stop_typing), daemon=True).start()
         try:
@@ -1100,6 +1126,8 @@ def handle_text(msg):
         return
 
     sess = _get_session(chat_id)
+    if _send_config_error(chat_id, sess):
+        return
     lock = _locks[chat_id]
 
     if lock.locked():

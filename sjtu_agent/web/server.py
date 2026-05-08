@@ -208,16 +208,19 @@ def _get_config_values() -> dict:
     cfg = _read_config()
     agent_cfg = _load_effective_agent_config()
 
-    # 推断当前使用的 provider
-    provider = agent_cfg.get("_provider") or agent_cfg.get("provider") or "custom"
-    if env.get("ZHIYUAN_API_KEY"):
-        provider = "zhiyuan"
-    elif env.get("DEEPSEEK_API_KEY"):
-        provider = "deepseek"
-    elif env.get("ANTHROPIC_API_KEY"):
-        provider = "anthropic"
-    elif env.get("OPENAI_API_KEY"):
-        provider = "openai"
+    # 优先使用终端聊天实际生效的 provider。只有旧配置完全没有 provider
+    # 信息时，才根据环境变量做兼容推断，避免 Web UI 被残留 env key 覆盖。
+    configured_provider = agent_cfg.get("_provider") or agent_cfg.get("provider")
+    provider = configured_provider or "custom"
+    if not configured_provider:
+        if env.get("ZHIYUAN_API_KEY"):
+            provider = "zhiyuan"
+        elif env.get("DEEPSEEK_API_KEY"):
+            provider = "deepseek"
+        elif env.get("ANTHROPIC_API_KEY"):
+            provider = "anthropic"
+        elif env.get("OPENAI_API_KEY"):
+            provider = "openai"
 
     # 从 agent_config.json 读 base_url / model
     base_url = agent_cfg.get("base_url", "")
@@ -230,13 +233,8 @@ def _get_config_values() -> dict:
         model = PRESETS[provider]["model"]
 
     # API key（脱敏）
-    raw_key = (
-        env.get("ZHIYUAN_API_KEY")
-        or env.get("DEEPSEEK_API_KEY")
-        or env.get("ANTHROPIC_API_KEY")
-        or env.get("OPENAI_API_KEY")
-        or agent_cfg.get("api_key", "")
-    )
+    env_key = PRESETS.get(provider, {}).get("env_key", "")
+    raw_key = (env.get(env_key) if env_key else "") or agent_cfg.get("api_key", "")
 
     return {
         "provider": provider,
@@ -592,12 +590,8 @@ def _wechat_qr_status(qrcode_key: str, ilink_base: str) -> dict:
                 capture_output=True, timeout=10,
             )
             started = r.returncode == 0
-        except Exception as exc:
-            print(f"[ERROR] provider registry sync failed: {exc}", file=sys.stderr)
-            raise RuntimeError(
-                "API 配置已写入基础配置，但同步 provider registry 失败；"
-                "请检查 llm_providers.json 权限后重试。"
-            ) from exc
+        except Exception:
+            pass
         return {"status": "success", "daemon_started": started}
     elif code in (1, 2):
         return {"status": "pending"}
@@ -807,8 +801,12 @@ class _Handler(BaseHTTPRequestHandler):
                 "api_key": resolved_key,
                 "model": resolved_model,
             })
-        except Exception:
-            pass
+        except Exception as exc:
+            print(f"[ERROR] provider registry sync failed: {exc}", file=sys.stderr)
+            raise RuntimeError(
+                "API 配置已写入基础配置，但同步 provider registry 失败；"
+                "请检查 llm_providers.json 权限后重试。"
+            ) from exc
 
     def _save_credentials(self, body: dict) -> None:
         env_updates: dict[str, str] = {}

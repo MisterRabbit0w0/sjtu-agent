@@ -176,7 +176,7 @@ def fetch_canvas(cfg: dict) -> list[dict]:
         seen_ids: set[int] = set()
         queries: list[dict] = [
             {"bucket": "upcoming", "per_page": 50, "order_by": "due_at"},
-            {"bucket": "past", "per_page": 50, "order_by": "due_at"},
+            {"bucket": "past", "per_page": 50, "order_by": "due_at", "order": "desc"},
         ]
         for asgn_params in queries:
             asgn_url: str | None = f"{base}/api/v1/courses/{cid}/assignments"
