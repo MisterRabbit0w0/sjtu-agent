@@ -220,9 +220,13 @@ def _save_wechat_fields(**kwargs) -> None:
 _sess: dict = {}
 _sess_lock = threading.Lock()
 
+_CONFIG_ERROR_MESSAGE = "LLM 未配置：缺少 api_key，请先运行 sjtu-agent setup"
+
 
 def _get_or_create_session() -> dict:
     with _sess_lock:
+        if _sess.get("config_error"):
+            _sess.clear()
         if not _sess:
             agent_cfg = agent.load_agent_config()
             llm_configs = agent.get_llm_configs(agent_cfg)
@@ -231,7 +235,8 @@ def _get_or_create_session() -> dict:
             primary_cfg = llm_configs[0]
             model = primary_cfg.get("model", "deepseek-chat")
             if not primary_cfg.get("api_key"):
-                raise RuntimeError("LLM 未配置：缺少 api_key，请先运行 sjtu-agent setup")
+                _sess.update({"messages": [], "config_error": _CONFIG_ERROR_MESSAGE})
+                return _sess
             _sess.update({
                 "messages":   [],
                 "model_box":  [model],
@@ -272,6 +277,14 @@ def _init_messages(sess: dict) -> None:
         "role": "system",
         "content": agent.SYSTEM_PROMPT + _build_date_ctx(),
     })
+
+
+def _send_config_error(client: ILinkClient, sess: dict, to_user: str, ctx_token: str) -> bool:
+    err = sess.get("config_error")
+    if not err:
+        return False
+    client.send(f"⚠️ {err}", to_user_id=to_user, context_token=ctx_token)
+    return True
 
 
 def _capture_turn(sess: dict, user_text: str) -> str:
@@ -350,6 +363,8 @@ def handle_message(client: ILinkClient, msg: dict) -> None:
     with _reply_lock:
         try:
             sess  = _get_or_create_session()
+            if _send_config_error(client, sess, from_user, ctx_token):
+                return
             reply = _capture_turn(sess, text)
             # 微信消息长度限制约 4096，超出则分段发送
             _send_chunks(client, reply, from_user, ctx_token)
