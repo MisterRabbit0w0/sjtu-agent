@@ -26,6 +26,9 @@ import urllib.parse
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
+from sjtu_agent.compat import fix_windows_encoding
+fix_windows_encoding()
+
 import requests
 from bs4 import BeautifulSoup
 from sjtu_agent.paths import CONFIG_PATH, ENV_PATH, SCHEDULE_CACHE_PATH as _SCHEDULE_CACHE_PATH
@@ -69,11 +72,17 @@ def parse_dt(s: str) -> datetime | None:
     if not s:
         return None
     s = s.strip()
+
+    try:
+        iso = s.replace("Z", "+00:00")
+        dt = datetime.fromisoformat(iso)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=CST)
+        return dt.astimezone(CST)
+    except ValueError:
+        pass
+
     fmts = [
-        "%Y-%m-%dT%H:%M:%SZ",
-        "%Y-%m-%dT%H:%M:%S.%fZ",
-        "%Y-%m-%dT%H:%M:%S+08:00",
-        "%Y-%m-%dT%H:%M:%S",
         "%Y-%m-%d %H:%M:%S",
         "%Y/%m/%d %H:%M:%S",
         "%Y-%m-%d %H:%M",
@@ -151,33 +160,55 @@ def fetch_canvas(cfg: dict) -> list[dict]:
         params = {}
 
     results: list[dict] = []
+    now = datetime.now(CST)
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
 
-    # 2. 逐课程拉取即将到期作业，并用 /students/submissions 批量核查个人提交状态
+    # 2. 拉取近期作业，并用 /students/submissions 批量核查个人提交状态。
+    # Canvas bucket=upcoming 会在截止时间一过就隐藏未提交作业；这里额外用
+    # bucket=past + 今日过滤来保留当天已过期但未提交的作业。
     # （include[]=submission 在 SJTU Canvas 有 bug，数据不准确）
     for course in courses:
         cid = course["id"]
         cname = course.get("name", f"课程{cid}")
 
-        # 2a. 拉取 upcoming 作业列表
+        # 2a. 拉取作业列表：upcoming + 今日已过期
         pending: list[dict] = []
-        asgn_url: str | None = f"{base}/api/v1/courses/{cid}/assignments"
-        asgn_params: dict = {"bucket": "upcoming", "per_page": 50, "order_by": "due_at"}
-        while asgn_url:
-            try:
-                r = session.get(asgn_url, params=asgn_params, timeout=15)
-                r.raise_for_status()
-            except requests.RequestException as e:
-                print(f"[Canvas] 获取 {cname} 作业失败：{e}")
-                break
-            for a in r.json():
-                if not a.get("submission_types"):
-                    continue
-                due = parse_dt(a.get("due_at", ""))
-                if not due or due < datetime.now(CST):
-                    continue
-                pending.append({"id": a["id"], "name": a.get("name", "未知作业"), "due": due})
-            asgn_url = r.links.get("next", {}).get("url")
-            asgn_params = {}
+        seen_ids: set[int] = set()
+        queries: list[dict] = [
+            {"bucket": "upcoming", "per_page": 50, "order_by": "due_at"},
+            {"bucket": "past", "per_page": 50, "order_by": "due_at", "order": "desc"},
+        ]
+        for asgn_params in queries:
+            asgn_url: str | None = f"{base}/api/v1/courses/{cid}/assignments"
+            is_past = asgn_params.get("bucket") == "past"
+            while asgn_url:
+                try:
+                    r = session.get(asgn_url, params=asgn_params, timeout=15)
+                    r.raise_for_status()
+                except requests.RequestException as e:
+                    print(f"[Canvas] 获取 {cname} 作业失败：{e}")
+                    break
+                page_data = r.json()
+                stop_past = False
+                for a in page_data:
+                    if not a.get("submission_types"):
+                        continue
+                    due = parse_dt(a.get("due_at", ""))
+                    if not due:
+                        continue
+                    if due < today_start:
+                        if is_past:
+                            stop_past = True
+                        continue
+                    aid = a["id"]
+                    if aid in seen_ids:
+                        continue
+                    seen_ids.add(aid)
+                    pending.append({"id": aid, "name": a.get("name", "未知作业"), "due": due})
+                if stop_past:
+                    break
+                asgn_url = r.links.get("next", {}).get("url")
+                asgn_params = {}
 
         if not pending:
             continue
@@ -247,6 +278,63 @@ def _fetch_aihaoke_enrolled_courses(cfg: dict) -> list[dict] | None:
         return None
 
     import uuid as _uuid
+
+    def _course_from_teach_class(c: dict) -> dict | None:
+        cid = c.get("classId") or c.get("courseId") or c.get("id")
+        iid = c.get("instanceId") or c.get("id") or cid
+        name = (
+            c.get("instanceName")
+            or c.get("courseName")
+            or c.get("className")
+            or c.get("name")
+            or (f"课程{cid}" if cid else "")
+        )
+        if not cid or not name:
+            return None
+        try:
+            return {"name": str(name).strip(), "courseId": int(cid), "instanceId": int(iid or cid)}
+        except (TypeError, ValueError):
+            return None
+
+    # 先走纯 API：当前 aihaoke 浏览器端就是从 teacher-instance API 返回已选班级。
+    # 失败时再保留远端新增的 Playwright WAF/Referer 兜底。
+    try:
+        resp = requests.post(
+            "https://sjtu.aihaoke.net/api/teach/instance/listMyClass",
+            json={"requestId": str(_uuid.uuid4())},
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+                "Referer": "https://sjtu.aihaoke.net/student/course",
+            },
+            timeout=15,
+        )
+        data = resp.json()
+        if data.get("code") != 401:
+            payload = data.get("data")
+            if isinstance(payload, dict):
+                rows = (
+                    payload.get("teachClassResponseList")
+                    or payload.get("rowList")
+                    or payload.get("list")
+                    or []
+                )
+            elif isinstance(payload, list):
+                rows = payload
+            else:
+                rows = []
+            courses = [course for row in rows if (course := _course_from_teach_class(row))]
+            if courses:
+                cfg["aihaoke_courses"] = courses
+                cfg["aihaoke_courses_fetched_at"] = datetime.now().timestamp()
+                CONFIG_PATH.write_text(
+                    json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8"
+                )
+                print(f"[aihaoke] ✓ 自动识别到 {len(courses)} 门课程：{[c['name'] for c in courses]}")
+                return courses
+    except Exception:
+        pass
+
     try:
         with sync_playwright() as pw:
             browser = pw.chromium.launch(headless=True)
@@ -307,24 +395,7 @@ def _fetch_aihaoke_enrolled_courses(cfg: dict) -> list[dict] | None:
     else:
         rows = []
 
-    courses: list[dict] = []
-    for c in rows:
-        cid = c.get("classId") or c.get("courseId") or c.get("id")
-        iid = c.get("instanceId") or c.get("id") or cid
-        name = (
-            c.get("instanceName")
-            or c.get("courseName")
-            or c.get("className")
-            or c.get("name")
-            or (f"课程{cid}" if cid else "")
-        )
-        if not cid or not name:
-            continue
-        courses.append({
-            "name": str(name).strip(),
-            "courseId": int(cid),
-            "instanceId": int(iid or cid),
-        })
+    courses = [course for row in rows if (course := _course_from_teach_class(row))]
 
     if not courses:
         print(f"[aihaoke] listMyClass 返回空列表，响应：{json.dumps(data, ensure_ascii=False)[:300]}")
@@ -377,7 +448,6 @@ def fetch_aihaoke(cfg: dict, *, force_refresh_courses: bool = False) -> list[dic
     try:
         from dotenv import load_dotenv
         load_dotenv(ENV_PATH)
-        load_dotenv()
     except ImportError:
         pass
 
@@ -463,6 +533,8 @@ def fetch_aihaoke(cfg: dict, *, force_refresh_courses: bool = False) -> list[dic
             total_pages = data.get("data", {}).get("pageCount", 1)
 
             for t in rows:
+                if t.get("requireFlag") != 1:
+                    continue
                 if t.get("myStatus") != 10:
                     continue
                 due = parse_dt(t.get("endTime", ""))
@@ -507,7 +579,6 @@ def refresh_aihaoke_cookies(cfg: dict) -> tuple[bool, str]:
     try:
         from dotenv import load_dotenv
         load_dotenv(ENV_PATH)
-        load_dotenv()
     except ImportError:
         pass
 
@@ -530,18 +601,27 @@ def refresh_aihaoke_cookies(cfg: dict) -> tuple[bool, str]:
             return False
         try:
             resp = requests.post(
-                "https://sjtu.aihaoke.net/api/learn/course/listMyCourse",
-                json={"page": {"pageNo": 1, "pageSize": 1}, "requestId": str(_uuid.uuid4())},
+                "https://sjtu.aihaoke.net/api/teach/instance/listMyClass",
+                json={"requestId": str(_uuid.uuid4())},
                 headers={
                     "Authorization": f"Bearer {token}",
                     "Content-Type": "application/json",
                 },
                 timeout=15,
             )
+            if resp.status_code in (401, 403):
+                return False
+            resp.raise_for_status()
             data = resp.json()
         except Exception:
             return False
-        return data.get("code") != 401
+        if data.get("code") not in (0, 200, None):
+            return False
+        payload = data.get("data")
+        if not isinstance(payload, dict):
+            return False
+        rows = payload.get("teachClassResponseList")
+        return isinstance(rows, list)
 
     def _collect_cookies(ctx) -> dict[str, str]:
         return {
@@ -676,7 +756,7 @@ def _phycai_fetch_with_login(cfg: dict) -> str | None:
 
     try:
         from dotenv import load_dotenv  # type: ignore
-        load_dotenv()
+        load_dotenv(ENV_PATH)
     except ImportError:
         pass
 
@@ -888,7 +968,7 @@ def _icourse_login_with_creds(cfg: dict) -> dict | None:
         return None
     try:
         from dotenv import load_dotenv  # type: ignore
-        load_dotenv()
+        load_dotenv(ENV_PATH)
     except ImportError:
         pass
     username = os.environ.get("MOOC_USERNAME", "").strip()
@@ -1517,7 +1597,7 @@ def download_aihaoke_assignments(
 
     try:
         from dotenv import load_dotenv
-        load_dotenv()
+        load_dotenv(ENV_PATH)
     except ImportError:
         pass
     ok, error = refresh_aihaoke_cookies(cfg)
@@ -1804,7 +1884,7 @@ def _dyweb_refresh_token(cfg: dict) -> str:
         return ""
     try:
         from dotenv import load_dotenv
-        load_dotenv()
+        load_dotenv(ENV_PATH)
     except ImportError:
         pass
     jaccount_cookies = cfg.get("jaccount_cookies", {})

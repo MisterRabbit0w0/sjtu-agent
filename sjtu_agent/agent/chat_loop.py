@@ -3,18 +3,25 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import threading
 import time
 import datetime as _dt
 from pathlib import Path
 from dotenv import load_dotenv
+from openai import OpenAI
 
-from sjtu_agent.paths import AGENT_CONFIG_PATH, ENV_PATH, DDL_CACHE_PATH
+import ddl_checker as dc
+
+from sjtu_agent.paths import AGENT_CONFIG_PATH, ENV_PATH, DDL_CACHE_PATH, PROVIDERS_CONFIG_PATH
 from sjtu_agent.terminal_ui import print_markdown_message, print_rule
 from sjtu_agent.agent.prompts import SYSTEM_PROMPT
-from sjtu_agent.agent.runner import _make_client, _run_one_turn, Spinner
-from sjtu_agent.agent.tools import TOOLS, run_tool, _fetch_ddls_parallel, _ddl_cache_get, tool_check_setup
+from sjtu_agent.agent.runner import _make_client, _run_one_turn, Spinner, _is_anthropic_model
+from sjtu_agent.agent.tools import (
+    TOOLS, run_tool, _fetch_ddls_parallel, _ddl_cache_get,
+    tool_check_setup, _load_reminders,
+)
 
 load_dotenv(ENV_PATH)
 
@@ -124,31 +131,337 @@ _UPDATE_AVAILABLE: dict = {}
 
 
 
-def load_agent_config() -> dict:
-    """加载 Agent LLM 配置，优先级：agent_config.json > 致远一号环境变量 > 空配置。
+def _read_agent_config_file() -> dict:
+    if not AGENT_CONFIG_PATH.exists():
+        return {}
+    try:
+        return json.loads(AGENT_CONFIG_PATH.read_text(encoding="utf-8-sig"))
+    except Exception:
+        return {}
 
-    agent_config.json 是用户在 web UI / setup 中显式配置的，最高优先级。
-    ZHIYUAN_API_KEY 仅作为没有显式配置时的 fallback，避免环境变量永久劫持配置。
-    """
-    # 1. 优先：用户显式配置（web UI / setup_wizard 写入）
-    if AGENT_CONFIG_PATH.exists():
+
+def save_agent_config(cfg: dict) -> None:
+    """Persist LLM config without transient runtime-only keys."""
+    data = {k: v for k, v in cfg.items() if not k.startswith("_")}
+    AGENT_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    AGENT_CONFIG_PATH.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def _read_providers_config_file() -> dict:
+    if not PROVIDERS_CONFIG_PATH.exists():
+        return {}
+    try:
+        return json.loads(PROVIDERS_CONFIG_PATH.read_text(encoding="utf-8-sig"))
+    except Exception:
+        return {}
+
+
+def save_providers_config(data: dict) -> None:
+    PROVIDERS_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    PROVIDERS_CONFIG_PATH.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def _provider_slug_from_base(base_url: str, used: set[str] | None = None) -> str:
+    used = used or set()
+    base = (base_url or "").lower()
+    if "models.sjtu.edu.cn" in base:
+        name = "zhiyuan"
+    elif "zenmux.ai" in base:
+        name = "zenmux"
+    elif "api.openai.com" in base:
+        name = "openai"
+    else:
         try:
-            cfg = json.loads(AGENT_CONFIG_PATH.read_text())
-            if cfg.get("api_key") and cfg.get("model"):
-                return cfg
-        except (json.JSONDecodeError, OSError):
-            pass
-    # 2. fallback：致远一号环境变量
-    zhiyuan_base = os.environ.get(_ZHIYUAN_BASE_URL_ENV, "").strip()
-    zhiyuan_key  = os.environ.get(_ZHIYUAN_API_KEY_ENV, "").strip()
-    if zhiyuan_key:
-        return {
-            "base_url": zhiyuan_base or _ZHIYUAN_DEFAULT_BASE,
-            "api_key":  zhiyuan_key,
-            "model":    _ZHIYUAN_DEFAULT_MODEL,
-            "_source":  "zhiyuan_env",
+            from urllib.parse import urlparse
+            host = urlparse(base_url).hostname or "provider"
+        except Exception:
+            host = "provider"
+        name = re.sub(r"[^a-zA-Z0-9_-]+", "-", host.split(".")[0].lower()).strip("-") or "provider"
+    if name not in used:
+        return name
+    i = 2
+    while f"{name}-{i}" in used:
+        i += 1
+    return f"{name}-{i}"
+
+
+def _provider_display_name(name: str) -> str:
+    return {
+        "zhiyuan": "致远一号",
+        "zenmux": "ZenMux",
+        "openai": "OpenAI",
+    }.get(name, name)
+
+
+def _provider_from_llm_config(cfg: dict, used: set[str]) -> tuple[str, dict] | None:
+    base_url = (cfg.get("base_url") or "").strip().rstrip("/")
+    api_key = (cfg.get("api_key") or "").strip()
+    if not base_url or not api_key:
+        return None
+    name = _provider_slug_from_base(base_url, used)
+    provider = {
+        "display_name": _provider_display_name(name),
+        "base_url": base_url,
+        "api_key": api_key,
+        "models_path": "/models",
+        "default_model": cfg.get("model") or _ZHIYUAN_DEFAULT_MODEL,
+    }
+    if name == "zhiyuan":
+        provider["api_key_env"] = _ZHIYUAN_API_KEY_ENV
+    return name, provider
+
+
+def _build_provider_registry_from_legacy() -> dict:
+    legacy = _read_agent_config_file()
+    providers: dict[str, dict] = {}
+    used: set[str] = set()
+
+    primary = _provider_from_llm_config(legacy, used)
+    if primary:
+        name, provider = primary
+        providers[name] = provider
+        used.add(name)
+        current_provider = name
+        current_model = legacy.get("model") or provider.get("default_model")
+    else:
+        current_provider = "zhiyuan"
+        current_model = legacy.get("model") or _ZHIYUAN_DEFAULT_MODEL
+
+    for fallback in legacy.get("fallbacks") or []:
+        if not isinstance(fallback, dict):
+            continue
+        base = (fallback.get("base_url") or "").strip().rstrip("/")
+        if any((p.get("base_url") or "").rstrip("/") == base for p in providers.values()):
+            continue
+        item = _provider_from_llm_config(fallback, used)
+        if not item:
+            continue
+        name, provider = item
+        providers[name] = provider
+        used.add(name)
+
+    zhiyuan_key = os.environ.get(_ZHIYUAN_API_KEY_ENV, "").strip()
+    if zhiyuan_key and "zhiyuan" not in providers:
+        providers["zhiyuan"] = {
+            "display_name": "致远一号",
+            "base_url": os.environ.get(_ZHIYUAN_BASE_URL_ENV, "").strip() or _ZHIYUAN_DEFAULT_BASE,
+            "api_key": zhiyuan_key,
+            "api_key_env": _ZHIYUAN_API_KEY_ENV,
+            "models_path": "/models",
+            "default_model": current_model or _ZHIYUAN_DEFAULT_MODEL,
         }
-    return {}
+        current_provider = "zhiyuan"
+
+    return {
+        "current_provider": current_provider,
+        "current_model": current_model or _ZHIYUAN_DEFAULT_MODEL,
+        "providers": providers,
+    }
+
+
+def load_providers_config() -> dict:
+    data = _read_providers_config_file()
+    if not isinstance(data.get("providers"), dict) or not data.get("providers"):
+        data = _build_provider_registry_from_legacy()
+        save_providers_config(data)
+
+    providers = data.setdefault("providers", {})
+    zhiyuan_key = os.environ.get(_ZHIYUAN_API_KEY_ENV, "").strip()
+    if zhiyuan_key:
+        zhiyuan = providers.setdefault("zhiyuan", {
+            "display_name": "致远一号",
+            "base_url": os.environ.get(_ZHIYUAN_BASE_URL_ENV, "").strip() or _ZHIYUAN_DEFAULT_BASE,
+            "models_path": "/models",
+            "default_model": _ZHIYUAN_DEFAULT_MODEL,
+        })
+        zhiyuan.setdefault("display_name", "致远一号")
+        zhiyuan["base_url"] = os.environ.get(_ZHIYUAN_BASE_URL_ENV, "").strip() or zhiyuan.get("base_url") or _ZHIYUAN_DEFAULT_BASE
+        zhiyuan["api_key_env"] = _ZHIYUAN_API_KEY_ENV
+        zhiyuan.setdefault("api_key", zhiyuan_key)
+        data.setdefault("current_provider", "zhiyuan")
+        data.setdefault("current_model", zhiyuan.get("default_model") or _ZHIYUAN_DEFAULT_MODEL)
+
+    if not data.get("current_provider") and providers:
+        data["current_provider"] = next(iter(providers))
+    if not data.get("current_model"):
+        cur_provider = providers.get(data.get("current_provider"), {})
+        data["current_model"] = cur_provider.get("default_model") or _ZHIYUAN_DEFAULT_MODEL
+    return data
+
+
+def _provider_api_key(provider: dict) -> str:
+    env_name = (provider.get("api_key_env") or "").strip()
+    if env_name and os.environ.get(env_name, "").strip():
+        return os.environ.get(env_name, "").strip()
+    return (provider.get("api_key") or "").strip()
+
+
+def _current_provider_config(registry: dict | None = None) -> dict:
+    registry = registry or load_providers_config()
+    providers = registry.get("providers") or {}
+    provider_id = registry.get("current_provider")
+    provider = providers.get(provider_id) or {}
+    if not provider and providers:
+        provider_id, provider = next(iter(providers.items()))
+    return {
+        "provider": provider_id or "",
+        "base_url": (provider.get("base_url") or "").strip().rstrip("/"),
+        "api_key": _provider_api_key(provider),
+        "model": registry.get("current_model") or provider.get("default_model") or _ZHIYUAN_DEFAULT_MODEL,
+        "models_path": provider.get("models_path") or provider.get("model_endpoint") or "/models",
+        "_provider": provider_id or "",
+        "_provider_display": provider.get("display_name") or provider_id or "",
+        "_from_provider_registry": True,
+    }
+
+
+def _set_current_provider_model(provider_id: str | None = None, model: str | None = None) -> dict:
+    registry = load_providers_config()
+    providers = registry.get("providers") or {}
+    provider_changed = provider_id is not None and provider_id != registry.get("current_provider")
+    if provider_id is not None:
+        if provider_id not in providers:
+            raise ValueError(f"未找到 provider: {provider_id}")
+        registry["current_provider"] = provider_id
+    current_provider = registry.get("current_provider")
+    if model is not None and model.strip():
+        registry["current_model"] = _resolve_model_name(model)
+    elif provider_changed:
+        provider = providers.get(current_provider, {})
+        registry["current_model"] = provider.get("default_model") or registry.get("current_model") or _ZHIYUAN_DEFAULT_MODEL
+    elif not registry.get("current_model"):
+        provider = providers.get(current_provider, {})
+        registry["current_model"] = provider.get("default_model") or _ZHIYUAN_DEFAULT_MODEL
+    save_providers_config(registry)
+    current_cfg = _current_provider_config(registry)
+    save_agent_config({
+        "provider": current_cfg.get("_provider"),
+        "base_url": current_cfg.get("base_url"),
+        "api_key": current_cfg.get("api_key"),
+        "model": current_cfg.get("model"),
+    })
+    return current_cfg
+
+
+def _print_provider_list(registry: dict) -> None:
+    current = registry.get("current_provider")
+    providers = registry.get("providers") or {}
+    if not providers:
+        print("  本地 provider 文件为空。可用 /provider add <name> 添加。\n")
+        return
+    for name, provider in providers.items():
+        marker = " *" if name == current else ""
+        display = provider.get("display_name") or name
+        base = provider.get("base_url") or ""
+        print(f"  {name}{marker}  {display}  {base}")
+    print()
+
+
+def load_agent_config() -> dict:
+    """加载 Agent LLM 配置，优先级：provider registry > agent_config.json > 空配置。"""
+    cfg = _current_provider_config()
+    if cfg.get("api_key") and cfg.get("model"):
+        return cfg
+    return _read_agent_config_file()
+
+
+def _strip_fallbacks(cfg: dict) -> dict:
+    return {k: v for k, v in cfg.items() if k != "fallbacks"}
+
+
+def get_llm_configs(cfg: dict | None = None) -> list[dict]:
+    """Return the primary LLM config followed by any configured fallbacks."""
+    cfg = cfg or load_agent_config()
+    configs: list[dict] = []
+    primary = _strip_fallbacks(cfg)
+    if primary.get("api_key") and primary.get("model"):
+        configs.append(primary)
+    if cfg.get("_from_provider_registry"):
+        return configs
+    for fallback in cfg.get("fallbacks") or []:
+        if not isinstance(fallback, dict):
+            continue
+        item = _strip_fallbacks(fallback)
+        if item.get("api_key") and item.get("model"):
+            configs.append(item)
+    return configs
+
+
+_MODEL_ALIASES = {
+    "ds": "deepseek-v3.2",
+    "deepseek": "deepseek-v3.2",
+    "reasoner": "deepseek-reasoner",
+    "glm": "glm-5.1",
+}
+
+
+def _resolve_model_name(name: str) -> str:
+    stripped = name.strip()
+    return _MODEL_ALIASES.get(stripped.lower(), stripped)
+
+
+def _list_provider_models(cfg: dict) -> tuple[list[str], str]:
+    """Fetch model ids from the current OpenAI-compatible provider."""
+    if _is_anthropic_model(cfg.get("model", "")):
+        return [], "Anthropic 协议暂不支持通过此命令动态列模型，请直接输入模型名切换。"
+    base_url = (cfg.get("base_url") or "").strip().rstrip("/")
+    api_key = (cfg.get("api_key") or "").strip()
+    if not base_url or not api_key:
+        return [], "当前 base_url/api_key 不完整，无法列出模型。"
+    paths = []
+    configured_path = (cfg.get("models_path") or cfg.get("model_endpoint") or "").strip()
+    if configured_path:
+        paths.append(configured_path)
+    paths.extend(["/models", "/model"])
+    seen: set[str] = set()
+    urls: list[str] = []
+    for path in paths:
+        url = path if path.startswith(("http://", "https://")) else f"{base_url}/{path.lstrip('/')}"
+        if url not in seen:
+            urls.append(url)
+            seen.add(url)
+    last_error = ""
+    try:
+        import requests as _req
+    except ImportError:
+        return [], "需要安装 requests 库才能列出模型：pip install requests"
+    try:
+        payload = None
+        for url in urls:
+            try:
+                resp = _req.get(
+                    url,
+                    headers={"Authorization": f"Bearer {api_key}"},
+                    timeout=20,
+                )
+                resp.raise_for_status()
+                payload = resp.json()
+                break
+            except Exception as exc:
+                last_error = f"{url}: {type(exc).__name__}: {exc}"
+        if payload is None:
+            return [], f"模型列表请求失败：{last_error}"
+    except Exception as exc:
+        return [], f"模型列表请求失败：{type(exc).__name__}: {exc}"
+
+    raw_items = payload.get("data") if isinstance(payload, dict) else payload
+    if not isinstance(raw_items, list):
+        return [], "模型列表响应格式不符合 OpenAI /models 约定。"
+    models: list[str] = []
+    for item in raw_items:
+        if isinstance(item, dict):
+            model_id = item.get("id") or item.get("name") or item.get("model")
+        else:
+            model_id = str(item)
+        if model_id:
+            models.append(str(model_id))
+    return sorted(set(models)), ""
+
+
+def _reset_chat_history(messages: list, system_content: str | None = None) -> None:
+    system_content = system_content or (messages[0].get("content") if messages else SYSTEM_PROMPT)
+    messages.clear()
+    messages.append({"role": "system", "content": system_content})
 
 
 def _test_llm_connection_simple(base_url: str, api_key: str, model: str) -> tuple[bool, str]:
@@ -219,7 +532,7 @@ def setup_agent_config() -> dict:
         "api_key":  api_key,
         "model":    model,
     }
-    AGENT_CONFIG_PATH.write_text(json.dumps(cfg, indent=2, ensure_ascii=False))
+    save_agent_config(cfg)
     print("\nAgent 配置已保存。\n")
     return cfg
 
@@ -229,7 +542,7 @@ def setup_agent_config() -> dict:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-def chat_loop(client, model: str):
+def chat_loop(client, model: str, fallback_configs: list[dict] | None = None):
     import datetime as _dt
     _now = _dt.datetime.now()
     _year = _now.year
@@ -265,6 +578,9 @@ def chat_loop(client, model: str):
     messages = [{"role": "system", "content": SYSTEM_PROMPT + _date_ctx}]
     model_box  = [model]   # 用列表包裹使内部可修改
     client_box = [client]  # 同理，切换模型时可替换 client
+    initial_cfg = load_agent_config()
+    provider_box = [(initial_cfg.get("_provider") or initial_cfg.get("provider") or "default")]
+    fallback_box = [list(fallback_configs or [])]
 
     # ── 启动时后台预热 DDL 缓存 + 检查更新（完全不阻塞主线程）──────────────────
     _prefetch_ddls_background()
@@ -294,7 +610,7 @@ def chat_loop(client, model: str):
             "role": "user",
             "content": f"配置检查结果：{setup_json}\n请根据结果告知我缺少哪些配置，并引导我完成设置。",
         })
-        _run_one_turn(client_box[0], model_box[0], messages)
+        _run_one_turn(client_box[0], model_box[0], messages, fallback_box[0])
         print("输入问题继续对话，输入 quit 退出。\n")
 
     # ── 启动时检查即将到期的提醒事项（30分钟内）────────────────────────────
@@ -333,7 +649,7 @@ def chat_loop(client, model: str):
 
     while True:
         try:
-            user_input = input(f"你[{model_box[0]}]: ").strip()
+            user_input = input(f"你[{provider_box[0]}/{model_box[0]}]: ").strip()
         except (EOFError, KeyboardInterrupt):
             print("\n再见！")
             break
@@ -344,31 +660,151 @@ def chat_loop(client, model: str):
             print("再见！")
             break
 
-        # 断言命令
-        if user_input.startswith("/model"):
-            print_rule("切换模型配置")
-            cur = load_agent_config()
-            new_base  = input(f"API Base URL（当前: {cur.get('base_url','')}，回车不变）: ").strip()
-            new_key   = input(f"API Key（当前: {'*'*8 if cur.get('api_key') else '未设置'}，回车不变）: ").strip()
-            new_model = input(f"模型名称（当前: {cur.get('model','')}，回车不变）: ").strip()
-            updated = {
-                "base_url": new_base  or cur.get("base_url", "https://api.openai.com/v1"),
-                "api_key":  new_key   or cur.get("api_key", ""),
-                "model":    new_model or cur.get("model", "deepseek-chat"),
-            }
-            AGENT_CONFIG_PATH.write_text(json.dumps(updated, indent=2, ensure_ascii=False))
+        if user_input.startswith("/provider"):
+            registry = load_providers_config()
+            parts = user_input.split()
+            subcmd = parts[1].lower() if len(parts) > 1 else ""
+
+            if not subcmd or subcmd in ("help", "-h", "--help", "list", "ls"):
+                print_rule("Provider")
+                print(f"  当前 provider: {registry.get('current_provider')}")
+                print(f"  当前模型: {registry.get('current_model') or model_box[0]}")
+                print("  用法:")
+                print("    /provider list               列出本地 provider 文件里的供应商")
+                print("    /provider <name>             切换供应商")
+                print("    /provider <name> <model>     切换供应商并指定模型")
+                print("    /provider add <name>         添加供应商到本地文件")
+                print("    /provider config [name]      修改供应商 base_url/api_key/model endpoint\n")
+                _print_provider_list(registry)
+                continue
+
+            if subcmd == "add":
+                name = parts[2].strip() if len(parts) > 2 else input("Provider 名称: ").strip()
+                if not name:
+                    print("  Provider 名称不能为空。\n")
+                    continue
+                providers = registry.setdefault("providers", {})
+                if name in providers:
+                    print(f"  Provider 已存在: {name}\n")
+                    continue
+                display = input(f"显示名称（默认 {name}）: ").strip() or name
+                base = input("Base URL（例如 https://models.sjtu.edu.cn/api/v1）: ").strip().rstrip("/")
+                key = input("API Key: ").strip()
+                path = input("模型列表路径（默认 /models，也兼容 /model）: ").strip() or "/models"
+                default_model = input("默认模型（可留空，稍后用 /model 选择）: ").strip()
+                providers[name] = {
+                    "display_name": display,
+                    "base_url": base,
+                    "api_key": key,
+                    "models_path": path,
+                    "default_model": default_model,
+                }
+                registry["current_provider"] = name
+                if default_model:
+                    registry["current_model"] = default_model
+                save_providers_config(registry)
+                print(f"  已添加并切换到 provider: {name}\n")
+                continue
+
+            if subcmd in ("config", "edit"):
+                name = parts[2].strip() if len(parts) > 2 else registry.get("current_provider")
+                provider = (registry.get("providers") or {}).get(name)
+                if not provider:
+                    print(f"  未找到 provider: {name}\n")
+                    continue
+                print_rule(f"Provider: {name}")
+                new_display = input(f"显示名称（当前: {provider.get('display_name','')}，回车不变）: ").strip()
+                new_base = input(f"Base URL（当前: {provider.get('base_url','')}，回车不变）: ").strip()
+                new_key = input(f"API Key（当前: {'*'*8 if _provider_api_key(provider) else '未设置'}，回车不变）: ").strip()
+                new_path = input(f"模型列表路径（当前: {provider.get('models_path','/models')}，回车不变）: ").strip()
+                new_default = input(f"默认模型（当前: {provider.get('default_model','')}，回车不变）: ").strip()
+                if new_display:
+                    provider["display_name"] = new_display
+                if new_base:
+                    provider["base_url"] = new_base.rstrip("/")
+                if new_key:
+                    provider["api_key"] = new_key
+                if new_path:
+                    provider["models_path"] = new_path
+                if new_default:
+                    provider["default_model"] = _resolve_model_name(new_default)
+                save_providers_config(registry)
+                print(f"  已更新 provider: {name}\n")
+                continue
+
+            provider_id = parts[1]
+            model_name = _resolve_model_name(" ".join(parts[2:])) if len(parts) > 2 else None
+            try:
+                updated = _set_current_provider_model(provider_id, model_name)
+            except ValueError as exc:
+                print(f"  {exc}\n")
+                continue
             client_box[0] = _make_client(updated)
+            provider_box[0] = updated.get("_provider") or provider_id
             model_box[0] = updated["model"]
-            # 切换协议时重置对话，避免消息格式冲突
-            messages.clear()
-            messages.append({"role": "system", "content": SYSTEM_PROMPT})
+            fallback_box[0] = []
+            _reset_chat_history(messages)
             proto = "Anthropic" if _is_anthropic_model(updated["model"]) else "OpenAI"
-            print(f"  已切换到: {updated['model']}  [协议: {proto}]（已保存，对话已重置）\n")
+            print(f"  已切换到: {provider_box[0]}/{model_box[0]}  [协议: {proto}]（已保存，对话已重置）\n")
+            continue
+
+        if user_input.startswith("/model"):
+            cur = load_agent_config()
+            parts = user_input.split()
+            subcmd = parts[1].lower() if len(parts) > 1 else ""
+
+            if not subcmd or subcmd in ("select", "choose"):
+                print_rule("模型")
+                models, error = _list_provider_models(cur)
+                if error:
+                    print(f"  {error}\n")
+                    continue
+                for i, name in enumerate(models, 1):
+                    marker = " *" if name == cur.get("model") else ""
+                    print(f"  {i:>2}. {name}{marker}")
+                choice = input("选择模型编号或输入模型名（回车取消）: ").strip()
+                if not choice:
+                    print()
+                    continue
+                if choice.isdigit() and 1 <= int(choice) <= len(models):
+                    target_model = models[int(choice) - 1]
+                else:
+                    target_model = _resolve_model_name(choice)
+            elif subcmd in ("list", "ls"):
+                print_rule("可用模型")
+                models, error = _list_provider_models(cur)
+                if error:
+                    print(f"  {error}\n")
+                else:
+                    for name in models:
+                        marker = " *" if name == cur.get("model") else ""
+                        print(f"  {name}{marker}")
+                    print()
+                continue
+            elif subcmd in ("help", "-h", "--help", "current", "status"):
+                print_rule("模型")
+                print(f"  当前: {cur.get('_provider') or cur.get('provider')}/{cur.get('model') or model_box[0]}")
+                print("  用法:")
+                print("    /model                       拉取当前 provider 模型列表并交互选择")
+                print("    /model list                  只列出当前 provider 模型")
+                print("    /model <model-name>          直接切换模型并保存\n")
+                continue
+            else:
+                target_model = _resolve_model_name(" ".join(parts[1:]))
+
+            updated = _set_current_provider_model(model=target_model)
+            client_box[0] = _make_client(updated)
+            provider_box[0] = updated.get("_provider") or provider_box[0]
+            model_box[0] = updated["model"]
+            fallback_box[0] = []
+            _reset_chat_history(messages)
+            proto = "Anthropic" if _is_anthropic_model(updated["model"]) else "OpenAI"
+            print(f"  已切换到: {provider_box[0]}/{model_box[0]}  [协议: {proto}]（已保存，对话已重置）\n")
             continue
 
         messages.append({"role": "user", "content": user_input})
         try:
-            _run_one_turn(client_box[0], model_box[0], messages)
+            _run_one_turn(client_box[0], model_box[0], messages, fallback_box[0])
         except KeyboardInterrupt:
             print("\n[已中断当前请求，可继续输入]")
             # 移除未完成的 user 消息，保持历史干净
@@ -385,8 +821,16 @@ def main():
     cfg = load_agent_config()
     if not cfg or not cfg.get("api_key"):
         cfg = setup_agent_config()
-    client = _make_client(cfg)
-    chat_loop(client, cfg["model"])
+    configs = get_llm_configs(cfg)
+    if not configs:
+        configs = [{
+            "base_url": cfg.get("base_url", ""),
+            "api_key": cfg.get("api_key", ""),
+            "model": cfg.get("model", _ZHIYUAN_DEFAULT_MODEL),
+        }]
+    primary = configs[0]
+    client = _make_client(primary)
+    chat_loop(client, primary["model"], configs[1:])
 
 
 if __name__ == "__main__":

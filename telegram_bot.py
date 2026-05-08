@@ -57,17 +57,39 @@ bot = telebot.TeleBot(BOT_TOKEN)
 _sessions: dict[int, dict] = {}
 _locks:    dict[int, threading.Lock] = {}
 
+_CONFIG_ERROR_MESSAGE = "LLM 未配置：缺少 api_key，请先运行 sjtu-agent setup"
+
 
 def _get_session(chat_id: int) -> dict:
+    if chat_id not in _locks:
+        _locks[chat_id] = threading.Lock()
+    if _sessions.get(chat_id, {}).get("config_error"):
+        _sessions.pop(chat_id, None)
     if chat_id not in _sessions:
         agent_cfg = agent.load_agent_config()
+        llm_configs = agent.get_llm_configs(agent_cfg)
+        if not llm_configs:
+            llm_configs = [agent_cfg]
+        primary_cfg = llm_configs[0]
+        model = primary_cfg.get("model", "deepseek-chat")
+        if not primary_cfg.get("api_key"):
+            _sessions[chat_id] = {"messages": [], "config_error": _CONFIG_ERROR_MESSAGE}
+            return _sessions[chat_id]
         _sessions[chat_id] = {
             "messages":   [],
-            "model_box":  [agent_cfg["model"]],
-            "client_box": [agent._make_client(agent_cfg)],
+            "model_box":  [model],
+            "client_box": [agent._make_client(primary_cfg)],
+            "fallback_configs": llm_configs[1:],
         }
-        _locks[chat_id] = threading.Lock()
     return _sessions[chat_id]
+
+
+def _send_config_error(chat_id: int, sess: dict) -> bool:
+    err = sess.get("config_error")
+    if not err:
+        return False
+    bot.send_message(chat_id, f"⚙️ {err}")
+    return True
 
 
 _TG_CTX = (
@@ -137,6 +159,7 @@ def _capture_turn(sess: dict, user_text: str, on_tool_result=None) -> str:
             sess["client_box"][0],
             sess["model_box"][0],
             sess["messages"],
+            sess.get("fallback_configs"),
         )
     finally:
         sys.stdout = old_stdout
@@ -285,6 +308,8 @@ def _streamed_turn(sess: dict, user_text: str, on_progress, on_tool_result=None)
 
     for _round in range(MAX_ROUNDS):
         text_so_far = ""
+        full_reasoning = ""
+        has_native_reasoning = False
         tool_calls_map: dict[int, dict] = {}
 
         stream = client.chat.completions.create(
@@ -299,6 +324,10 @@ def _streamed_turn(sess: dict, user_text: str, on_progress, on_tool_result=None)
             if not chunk.choices:
                 continue
             delta = chunk.choices[0].delta
+            rc = agent._delta_reasoning_content(delta)
+            if rc:
+                has_native_reasoning = True
+                full_reasoning += rc
             if delta.content:
                 text_so_far += delta.content
                 full_text += delta.content
@@ -317,28 +346,29 @@ def _streamed_turn(sess: dict, user_text: str, on_progress, on_tool_result=None)
                             tool_calls_map[idx]["arguments"] += tc.function.arguments
 
         if not tool_calls_map:
-            sess["messages"].append({"role": "assistant", "content": text_so_far})
+            assistant_msg = {"role": "assistant", "content": text_so_far}
+            if has_native_reasoning and full_reasoning:
+                assistant_msg["reasoning_content"] = full_reasoning
+            sess["messages"].append(assistant_msg)
             return full_text
-
-        from openai.types.chat import ChatCompletionMessageToolCall, ChatCompletionMessage
-        from openai.types.chat.chat_completion_message_tool_call import Function
 
         tc_objs = []
         for idx in sorted(tool_calls_map):
             e = tool_calls_map[idx]
-            tc_objs.append(ChatCompletionMessageToolCall(
-                id=e["id"], type="function",
-                function=Function(name=e["name"], arguments=e["arguments"]),
-            ))
-        assistant_msg = ChatCompletionMessage(
-            role="assistant", content=text_so_far or None, tool_calls=tc_objs,
-        )
+            tc_objs.append({
+                "id": e["id"],
+                "type": "function",
+                "function": {"name": e["name"], "arguments": e["arguments"]},
+            })
+        assistant_msg = {"role": "assistant", "content": text_so_far or None, "tool_calls": tc_objs}
+        if has_native_reasoning and full_reasoning:
+            assistant_msg["reasoning_content"] = full_reasoning
         messages.append(assistant_msg)
         sess["messages"].append(assistant_msg)
 
         for tc in tc_objs:
-            fn_name = tc.function.name
-            try: fn_args = _json.loads(tc.function.arguments or "{}")
+            fn_name = tc["function"]["name"]
+            try: fn_args = _json.loads(tc["function"].get("arguments") or "{}")
             except Exception: fn_args = {}
             try: on_progress("tool_start", {"name": fn_name})
             except Exception: pass
@@ -350,7 +380,7 @@ def _streamed_turn(sess: dict, user_text: str, on_progress, on_tool_result=None)
             if on_tool_result:
                 try: on_tool_result(fn_name, fn_args, result)
                 except Exception: pass
-            tool_msg = {"role": "tool", "tool_call_id": tc.id, "content": result}
+            tool_msg = {"role": "tool", "tool_call_id": tc["id"], "content": result}
             messages.append(tool_msg)
             sess["messages"].append(tool_msg)
 
@@ -895,6 +925,7 @@ def _capture_turn_multimodal(sess: dict, content: list) -> str:
             sess["client_box"][0],
             sess["model_box"][0],
             sess["messages"],
+            sess.get("fallback_configs"),
         )
     finally:
         sys.stdout = old_stdout
@@ -918,6 +949,8 @@ def _capture_turn_multimodal(sess: dict, content: list) -> str:
 def _run_with_typing(chat_id: int, lock, fn):
     """在 typing 动作下运行 fn()，统一处理异常并发送结果。"""
     sess = _get_session(chat_id)
+    if _send_config_error(chat_id, sess):
+        return
     if lock.locked():
         bot.send_message(chat_id, "⏳ 上一条消息还在处理中，请稍候…")
         return
@@ -947,7 +980,10 @@ def handle_document(msg):
     caption  = (msg.caption or "").strip()
     filename = doc.file_name or f"file_{doc.file_id[:8]}"
 
-    lock = _locks.get(chat_id) or _get_session(chat_id) and _locks[chat_id]
+    sess = _get_session(chat_id)
+    if _send_config_error(chat_id, sess):
+        return
+    lock = _locks[chat_id]
     if lock.locked():
         bot.reply_to(msg, "⏳ 上一条消息还在处理中，请稍候…")
         return
@@ -956,6 +992,8 @@ def handle_document(msg):
 
     def run():
         sess = _get_session(chat_id)
+        if _send_config_error(chat_id, sess):
+            return
         stop_typing = threading.Event()
         threading.Thread(target=_keep_typing, args=(chat_id, stop_typing), daemon=True).start()
         try:
@@ -1021,7 +1059,10 @@ def handle_photo(msg):
     caption = (msg.caption or "").strip()
     # 取最高分辨率（photos[-1]）
     photo   = msg.photo[-1]
-    lock = _locks.get(chat_id) or _get_session(chat_id) and _locks[chat_id]
+    sess = _get_session(chat_id)
+    if _send_config_error(chat_id, sess):
+        return
+    lock = _locks[chat_id]
     if lock.locked():
         bot.reply_to(msg, "⏳ 上一条消息还在处理中，请稍候…")
         return
@@ -1030,6 +1071,8 @@ def handle_photo(msg):
 
     def run():
         sess = _get_session(chat_id)
+        if _send_config_error(chat_id, sess):
+            return
         stop_typing = threading.Event()
         threading.Thread(target=_keep_typing, args=(chat_id, stop_typing), daemon=True).start()
         try:
@@ -1083,6 +1126,8 @@ def handle_text(msg):
         return
 
     sess = _get_session(chat_id)
+    if _send_config_error(chat_id, sess):
+        return
     lock = _locks[chat_id]
 
     if lock.locked():

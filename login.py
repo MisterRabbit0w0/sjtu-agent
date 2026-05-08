@@ -29,11 +29,13 @@ import tempfile
 from pathlib import Path
 
 import requests
-from sjtu_agent.paths import CONFIG_PATH
+from sjtu_agent.paths import CONFIG_PATH, ENV_PATH
+from sjtu_agent.compat import fix_windows_encoding
+fix_windows_encoding()
 
 try:
     from dotenv import load_dotenv
-    load_dotenv()
+    load_dotenv(ENV_PATH)
 except ImportError:
     pass  # 未安装 python-dotenv 也可以直接用环境变量
 

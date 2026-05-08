@@ -20,6 +20,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
 
+from sjtu_agent.compat import fix_windows_encoding
+fix_windows_encoding()
+
 from sjtu_agent.paths import ENV_PATH, CONFIG_PATH, AGENT_CONFIG_PATH
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
@@ -38,6 +41,12 @@ PRESETS = {
         "base_url": "https://api.openai.com/v1",
         "model": "gpt-4o-mini",
         "env_key": "OPENAI_API_KEY",
+    },
+    "deepseek": {
+        "label": "DeepSeek",
+        "base_url": "https://api.deepseek.com/v1",
+        "model": "deepseek-chat",
+        "env_key": "DEEPSEEK_API_KEY",
     },
     "anthropic": {
         "label": "Anthropic (Claude)",
@@ -130,6 +139,14 @@ def _write_agent_config(data: dict) -> None:
     AGENT_CONFIG_PATH.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def _load_effective_agent_config() -> dict:
+    try:
+        from sjtu_agent.agent.chat_loop import load_agent_config
+        return load_agent_config()
+    except Exception:
+        return _read_agent_config()
+
+
 # ── 脱敏显示 ─────────────────────────────────────────────────────────────────
 
 def _mask(value: str, keep: int = 4) -> str:
@@ -147,14 +164,14 @@ def _get_status() -> dict:
     """返回各项配置是否就绪。"""
     env = _read_env()
     cfg = _read_config()
-    agent_cfg = _read_agent_config()
+    agent_cfg = _load_effective_agent_config()
 
     # 判断 LLM API 是否配置
     has_zhiyuan = bool(env.get("ZHIYUAN_API_KEY"))
-    has_openai = bool(env.get("OPENAI_API_KEY") or agent_cfg.get("api_key"))
+    has_openai = bool(env.get("OPENAI_API_KEY"))
     has_deepseek = bool(env.get("DEEPSEEK_API_KEY"))
     has_anthropic = bool(env.get("ANTHROPIC_API_KEY"))
-    has_api = has_zhiyuan or has_openai or has_deepseek or has_anthropic
+    has_api = bool(agent_cfg.get("api_key")) or has_zhiyuan or has_openai or has_deepseek or has_anthropic
 
     # Canvas
     has_canvas = bool(cfg.get("canvas_token") and not cfg.get("canvas_token", "").startswith("YOUR_"))
@@ -195,18 +212,21 @@ def _get_config_values() -> dict:
     """返回当前配置值（API Key 脱敏）。"""
     env = _read_env()
     cfg = _read_config()
-    agent_cfg = _read_agent_config()
+    agent_cfg = _load_effective_agent_config()
 
-    # 推断当前使用的 provider
-    provider = "custom"
-    if env.get("ZHIYUAN_API_KEY"):
-        provider = "zhiyuan"
-    elif env.get("DEEPSEEK_API_KEY"):
-        provider = "deepseek"
-    elif env.get("ANTHROPIC_API_KEY"):
-        provider = "anthropic"
-    elif env.get("OPENAI_API_KEY") or agent_cfg.get("api_key"):
-        provider = "openai"
+    # 优先使用终端聊天实际生效的 provider。只有旧配置完全没有 provider
+    # 信息时，才根据环境变量做兼容推断，避免 Web UI 被残留 env key 覆盖。
+    configured_provider = agent_cfg.get("_provider") or agent_cfg.get("provider")
+    provider = configured_provider or "custom"
+    if not configured_provider:
+        if env.get("ZHIYUAN_API_KEY"):
+            provider = "zhiyuan"
+        elif env.get("DEEPSEEK_API_KEY"):
+            provider = "deepseek"
+        elif env.get("ANTHROPIC_API_KEY"):
+            provider = "anthropic"
+        elif env.get("OPENAI_API_KEY"):
+            provider = "openai"
 
     # 从 agent_config.json 读 base_url / model
     base_url = agent_cfg.get("base_url", "")
@@ -219,13 +239,8 @@ def _get_config_values() -> dict:
         model = PRESETS[provider]["model"]
 
     # API key（脱敏）
-    raw_key = (
-        env.get("ZHIYUAN_API_KEY")
-        or env.get("DEEPSEEK_API_KEY")
-        or env.get("ANTHROPIC_API_KEY")
-        or env.get("OPENAI_API_KEY")
-        or agent_cfg.get("api_key", "")
-    )
+    env_key = PRESETS.get(provider, {}).get("env_key", "")
+    raw_key = (env.get(env_key) if env_key else "") or agent_cfg.get("api_key", "")
 
     return {
         "provider": provider,
@@ -259,43 +274,17 @@ def _get_chat_client():
     - claude 模型 → Anthropic SDK（带 claude-cli UA，兼容中转代理）
     - 其他模型   → OpenAI SDK
     """
-    env = _read_env()
-    agent_cfg = _read_agent_config()
+    _project_root = str(Path(__file__).resolve().parent.parent.parent)
+    if _project_root not in sys.path:
+        sys.path.insert(0, _project_root)
+    import agent as _agent
+
+    agent_cfg = _agent.load_agent_config()
     base_url = agent_cfg.get("base_url") or None
     model = agent_cfg.get("model", "deepseek-chat")
-    ua = agent_cfg.get("user_agent", "claude-cli/1.0.57")
-
-    if model.startswith("claude"):
-        api_key = env.get("ANTHROPIC_API_KEY") or agent_cfg.get("api_key", "")
-        from anthropic import Anthropic
-        client = Anthropic(
-            api_key=api_key,
-            base_url=base_url,
-            default_headers={"user-agent": ua},
-            timeout=120.0,
-        )
-        return client, model, "anthropic"
-
-    api_key = (
-        env.get("ZHIYUAN_API_KEY")
-        or env.get("DEEPSEEK_API_KEY")
-        or env.get("OPENAI_API_KEY")
-        or agent_cfg.get("api_key", "")
-    )
-
-    if model.startswith("claude"):
-        from anthropic import Anthropic
-        client = Anthropic(
-            api_key=api_key,
-            base_url=base_url,
-            default_headers={"user-agent": ua},
-            timeout=120.0,
-        )
-        return client, model, "anthropic"
-    else:
-        from openai import OpenAI
-        client = OpenAI(api_key=api_key, base_url=base_url, timeout=120.0)
-        return client, model, "openai"
+    proto = "anthropic" if _agent._is_anthropic_model(model) else "openai"
+    client = _agent._make_client({**agent_cfg, "base_url": base_url})
+    return client, model, proto
 
 
 def _stream_chat(user_message: str):
@@ -311,7 +300,9 @@ def _stream_chat(user_message: str):
     global _chat_history
 
     # 延迟导入 agent 模块（避免循环依赖 + 启动时间）
-    sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+    _project_root = str(Path(__file__).resolve().parent.parent.parent)
+    if _project_root not in sys.path:
+        sys.path.insert(0, _project_root)
     import agent as _agent
 
     if not _chat_history:
@@ -447,6 +438,8 @@ def _stream_chat_openai(client, model, _agent, max_rounds, _sse):
 
     for _round in range(max_rounds):
         full_text = ""
+        full_reasoning = ""
+        has_native_reasoning = False
         tool_calls_map: dict[int, dict] = {}
 
         try:
@@ -462,6 +455,10 @@ def _stream_chat_openai(client, model, _agent, max_rounds, _sse):
                 if not chunk.choices:
                     continue
                 delta = chunk.choices[0].delta
+                rc = _agent._delta_reasoning_content(delta)
+                if rc:
+                    has_native_reasoning = True
+                    full_reasoning += rc
                 if delta.content:
                     full_text += delta.content
                     yield _sse({"token": delta.content})
@@ -484,36 +481,36 @@ def _stream_chat_openai(client, model, _agent, max_rounds, _sse):
             return
 
         if not tool_calls_map:
-            _chat_history.append({"role": "assistant", "content": full_text})
-            messages.append({"role": "assistant", "content": full_text})
+            assistant_msg = {"role": "assistant", "content": full_text}
+            if has_native_reasoning and full_reasoning:
+                assistant_msg["reasoning_content"] = full_reasoning
+            _chat_history.append(assistant_msg)
+            messages.append(assistant_msg)
             return
 
         # 构建 assistant 消息
-        from openai.types.chat import ChatCompletionMessageToolCall
-        from openai.types.chat.chat_completion_message_tool_call import Function
-        from openai.types.chat import ChatCompletionMessage
-
-        tc_objs = []
+        tc_objs: list[dict] = []
         for idx in sorted(tool_calls_map):
             e = tool_calls_map[idx]
-            tc_objs.append(ChatCompletionMessageToolCall(
-                id=e["id"], type="function",
-                function=Function(name=e["name"], arguments=e["arguments"]),
-            ))
-        assistant_msg = ChatCompletionMessage(
-            role="assistant", content=full_text or None, tool_calls=tc_objs,
-        )
+            tc_objs.append({
+                "id": e["id"],
+                "type": "function",
+                "function": {"name": e["name"], "arguments": e["arguments"]},
+            })
+        assistant_msg = {"role": "assistant", "content": full_text or None, "tool_calls": tc_objs}
+        if has_native_reasoning and full_reasoning:
+            assistant_msg["reasoning_content"] = full_reasoning
         messages.append(assistant_msg)
 
         # 执行工具
         for tc in tc_objs:
-            fn_name = tc.function.name
-            fn_args = json.loads(tc.function.arguments or "{}")
+            fn_name = tc["function"]["name"]
+            fn_args = json.loads(tc["function"].get("arguments") or "{}")
             yield _sse({"tool_start": {"name": fn_name, "input": fn_args}})
             result = _agent.run_tool(fn_name, fn_args)
             result_preview = result[:500] if len(result) > 500 else result
             yield _sse({"tool_end": {"name": fn_name, "result": result_preview}})
-            messages.append({"role": "tool", "tool_call_id": tc.id, "content": result})
+            messages.append({"role": "tool", "tool_call_id": tc["id"], "content": result})
 
     _chat_history.append({"role": "assistant", "content": full_text})
 
@@ -768,7 +765,7 @@ class _Handler(BaseHTTPRequestHandler):
         if env_updates:
             _write_env(env_updates)
 
-        # 写 agent_config.json
+        # 写 agent_config.json，同时更新终端聊天实际读取的 provider registry。
         agent_cfg = _read_agent_config()
         if base_url:
             agent_cfg["base_url"] = base_url
@@ -777,6 +774,45 @@ class _Handler(BaseHTTPRequestHandler):
         if api_key and provider not in ("zhiyuan", "deepseek"):
             agent_cfg["api_key"] = api_key
         _write_agent_config(agent_cfg)
+
+        try:
+            from sjtu_agent.agent.chat_loop import load_providers_config, save_providers_config, save_agent_config
+
+            registry = load_providers_config()
+            providers = registry.setdefault("providers", {})
+            provider_id = provider if provider != "custom" else (agent_cfg.get("provider") or "custom")
+            preset = PRESETS.get(provider, PRESETS["custom"])
+            current = providers.get(provider_id, {})
+            resolved_base = base_url or current.get("base_url") or preset.get("base_url", "")
+            resolved_model = model or current.get("default_model") or preset.get("model", "deepseek-chat")
+            resolved_key = api_key or current.get("api_key") or agent_cfg.get("api_key", "")
+
+            providers[provider_id] = {
+                **current,
+                "display_name": current.get("display_name") or preset.get("label") or provider_id,
+                "base_url": resolved_base.rstrip("/") if resolved_base else "",
+                "api_key": resolved_key,
+                "models_path": current.get("models_path") or "/models",
+                "default_model": resolved_model,
+            }
+            if provider == "zhiyuan":
+                providers[provider_id]["api_key_env"] = "ZHIYUAN_API_KEY"
+
+            registry["current_provider"] = provider_id
+            registry["current_model"] = resolved_model
+            save_providers_config(registry)
+            save_agent_config({
+                "provider": provider_id,
+                "base_url": resolved_base,
+                "api_key": resolved_key,
+                "model": resolved_model,
+            })
+        except Exception as exc:
+            print(f"[ERROR] provider registry sync failed: {exc}", file=sys.stderr)
+            raise RuntimeError(
+                "API 配置已写入基础配置，但同步 provider registry 失败；"
+                "请检查 llm_providers.json 权限后重试。"
+            ) from exc
 
     def _save_credentials(self, body: dict) -> None:
         env_updates: dict[str, str] = {}

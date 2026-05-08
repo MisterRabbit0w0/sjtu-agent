@@ -151,7 +151,55 @@ def _anthropic_tools() -> list:
     return result
 
 
-def _stream_with_think_tags(stream, spinner: "Spinner") -> tuple[str, str, dict]:
+def _delta_reasoning_content(delta) -> str:
+    """Return provider-specific reasoning text from an OpenAI-compatible delta.
+
+    Some gateways expose custom fields as attributes; others keep them in
+    ``model_extra`` / ``model_dump()`` so plain ``getattr`` silently misses them.
+    """
+    keys = ("reasoning_content", "reasoning")
+
+    def _text(value) -> str:
+        if value is None:
+            return ""
+        if isinstance(value, str):
+            return value
+        return str(value) if value else ""
+
+    if isinstance(delta, dict):
+        for key in keys:
+            value = _text(delta.get(key))
+            if value:
+                return value
+
+    for key in keys:
+        value = _text(getattr(delta, key, None))
+        if value:
+            return value
+
+    extra = getattr(delta, "model_extra", None)
+    if isinstance(extra, dict):
+        for key in keys:
+            value = _text(extra.get(key))
+            if value:
+                return value
+
+    dump = None
+    if hasattr(delta, "model_dump"):
+        try:
+            dump = delta.model_dump()
+        except Exception:
+            dump = None
+    if isinstance(dump, dict):
+        for key in keys:
+            value = _text(dump.get(key))
+            if value:
+                return value
+
+    return ""
+
+
+def _stream_with_think_tags(stream, spinner: "Spinner") -> tuple[str, str, dict, bool]:
     """
     消费 OpenAI 兼容的流式响应，处理两种思考格式：
       1. delta.reasoning_content 字段（DeepSeek-R1 原生）
@@ -163,11 +211,12 @@ def _stream_with_think_tags(stream, spinner: "Spinner") -> tuple[str, str, dict]
     关键：在开始写思考文字前先停 Spinner，思考结束后重启 Spinner 等待正文。
     这样消除了 Spinner 的 \\r 和 write() 并发竞争导致的闪烁。
 
-    返回：(full_content_no_think, full_reasoning, tool_calls_map)
+    返回：(full_content_no_think, full_reasoning, tool_calls_map, has_native_reasoning)
     """
     full_content   = ""   # 包含 <think> 的原始正文（用于存入 messages）
     full_reasoning = ""   # 思考内容（展示并收集）
     tool_calls_map: dict[int, dict] = {}
+    has_native_reasoning = False
 
     TAG_OPEN  = "<think>"
     TAG_CLOSE = "</think>"
@@ -205,8 +254,9 @@ def _stream_with_think_tags(stream, spinner: "Spinner") -> tuple[str, str, dict]
             continue
 
         # ── reasoning_content 字段（DeepSeek-R1 / Qwen 原生）────────────
-        rc = getattr(delta, "reasoning_content", None) or ""
+        rc = _delta_reasoning_content(delta)
         if rc:
+            has_native_reasoning = True
             _start_thinking()
             sys.stdout.write(rc)
             sys.stdout.flush()
@@ -268,7 +318,24 @@ def _stream_with_think_tags(stream, spinner: "Spinner") -> tuple[str, str, dict]
 
     # 从 full_content 中剥离 <think>...</think> 块，得到纯正文
     clean_content = re.sub(r"<think>.*?</think>", "", full_content, flags=re.DOTALL).strip()
-    return clean_content, full_reasoning, tool_calls_map
+    return clean_content, full_reasoning, tool_calls_map, has_native_reasoning
+
+
+def _assistant_message(
+    *,
+    content: str | None,
+    reasoning_content: str = "",
+    has_native_reasoning: bool = False,
+    tool_calls: list[dict] | None = None,
+) -> dict:
+    msg: dict = {"role": "assistant", "content": content}
+    if tool_calls is not None:
+        msg["tool_calls"] = tool_calls
+    if has_native_reasoning and reasoning_content:
+        # Some OpenAI-compatible thinking-mode gateways, including ZenMux,
+        # require the model's native reasoning_content to be echoed in history.
+        msg["reasoning_content"] = reasoning_content
+    return msg
 
 
 def _run_one_turn_openai(client: OpenAI, model: str, messages: list) -> None:
@@ -296,7 +363,7 @@ def _run_one_turn_openai(client: OpenAI, model: str, messages: list) -> None:
                 continue
             raise
         try:
-            clean_content, _reasoning, tool_calls_map = _stream_with_think_tags(stream, spinner)
+            clean_content, _reasoning, tool_calls_map, has_native_reasoning = _stream_with_think_tags(stream, spinner)
         except Exception as e:
             spinner.stop()
             raise
@@ -308,41 +375,40 @@ def _run_one_turn_openai(client: OpenAI, model: str, messages: list) -> None:
 
         # ── 纯文本回复（无工具调用）─────────────────────────────────────
         if not tool_calls_map:
-            messages.append({"role": "assistant", "content": clean_content})
+            messages.append(_assistant_message(
+                content=clean_content,
+                reasoning_content=_reasoning,
+                has_native_reasoning=has_native_reasoning,
+            ))
             return
 
         # ── 有工具调用：构建 assistant 消息并执行 ───────────────────────
-        from openai.types.chat import ChatCompletionMessageToolCall
-        from openai.types.chat.chat_completion_message_tool_call import Function
-        from openai.types.chat import ChatCompletionMessage
-
-        tool_call_objs = []
+        tool_call_objs: list[dict] = []
         for idx in sorted(tool_calls_map):
             e = tool_calls_map[idx]
-            tool_call_objs.append(
-                ChatCompletionMessageToolCall(
-                    id=e["id"],
-                    type="function",
-                    function=Function(name=e["name"], arguments=e["arguments"]),
-                )
-            )
+            tool_call_objs.append({
+                "id": e["id"],
+                "type": "function",
+                "function": {"name": e["name"], "arguments": e["arguments"]},
+            })
 
-        assistant_msg = ChatCompletionMessage(
-            role="assistant",
+        assistant_msg = _assistant_message(
             content=clean_content or None,
+            reasoning_content=_reasoning,
+            has_native_reasoning=has_native_reasoning,
             tool_calls=tool_call_objs,
         )
         messages.append(assistant_msg)
 
         for tc in tool_call_objs:
-            fn_name = tc.function.name
-            fn_args = json.loads(tc.function.arguments or "{}")
+            fn_name = tc["function"]["name"]
+            fn_args = json.loads(tc["function"].get("arguments") or "{}")
             if fn_name not in ("check_setup",):
                 spinner.start(_TOOL_LABELS.get(fn_name, fn_name) + "…")
             result = _get_run_tool()(fn_name, fn_args)
             if fn_name not in ("check_setup",):
                 spinner.stop()
-            messages.append({"role": "tool", "tool_call_id": tc.id, "content": result})
+            messages.append({"role": "tool", "tool_call_id": tc["id"], "content": result})
 
 
 def _run_one_turn_anthropic(client: Anthropic, model: str, messages: list) -> None:
@@ -544,9 +610,39 @@ def _run_one_turn_anthropic(client: Anthropic, model: str, messages: list) -> No
         messages.append({"role": "user", "content": tool_results})
 
 
-def _run_one_turn(client, model: str, messages: list) -> None:
-    if _is_anthropic_model(model):
-        _run_one_turn_anthropic(client, model, messages)
-    else:
-        _run_one_turn_openai(client, model, messages)
+def _llm_label(cfg: dict) -> str:
+    base = cfg.get("base_url") or "default base_url"
+    provider = cfg.get("_provider") or cfg.get("provider")
+    prefix = f"{provider}/" if provider else ""
+    return f"{prefix}{cfg.get('model', 'unknown-model')} @ {base}"
+
+
+def _run_one_turn(client, model: str, messages: list, fallback_configs: list[dict] | None = None) -> None:
+    attempts = [(model, client, None)]
+    for cfg in fallback_configs or []:
+        attempts.append((cfg["model"], _make_client(cfg), cfg))
+
+    last_error: Exception | None = None
+    for index, (attempt_model, attempt_client, attempt_cfg) in enumerate(attempts):
+        start_len = len(messages)
+        if attempt_cfg is not None:
+            print(f"\r[提示] 切换到 fallback 模型：{_llm_label(attempt_cfg)}")
+        try:
+            if _is_anthropic_model(attempt_model):
+                _run_one_turn_anthropic(attempt_client, attempt_model, messages)
+            else:
+                _run_one_turn_openai(attempt_client, attempt_model, messages)
+            return
+        except KeyboardInterrupt:
+            raise
+        except Exception as exc:
+            del messages[start_len:]
+            last_error = exc
+            if index < len(attempts) - 1:
+                print(f"\r[提示] 模型请求失败，准备尝试 fallback（{type(exc).__name__}: {exc}）")
+                continue
+            raise
+
+    if last_error:
+        raise last_error
 

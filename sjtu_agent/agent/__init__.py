@@ -18,9 +18,11 @@ from sjtu_agent.agent.tools import (
 from sjtu_agent.agent.runner import (
     Spinner, _make_client, _is_anthropic_model, _anthropic_tools,
     _run_one_turn, _run_one_turn_openai, _run_one_turn_anthropic,
-    _stream_with_think_tags, _ANSI_OK,
+    _stream_with_think_tags, _delta_reasoning_content, _ANSI_OK,
 )
 from sjtu_agent.agent.chat_loop import (
-    load_agent_config, setup_agent_config, chat_loop, main,
+    load_agent_config, save_agent_config, get_llm_configs,
+    load_providers_config, save_providers_config,
+    setup_agent_config, chat_loop, main,
     _prefetch_ddls_background, _check_for_updates, _UPDATE_AVAILABLE,
 )
