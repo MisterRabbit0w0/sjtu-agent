@@ -592,8 +592,12 @@ def _wechat_qr_status(qrcode_key: str, ilink_base: str) -> dict:
                 capture_output=True, timeout=10,
             )
             started = r.returncode == 0
-        except Exception:
-            pass
+        except Exception as exc:
+            print(f"[ERROR] provider registry sync failed: {exc}", file=sys.stderr)
+            raise RuntimeError(
+                "API 配置已写入基础配置，但同步 provider registry 失败；"
+                "请检查 llm_providers.json 权限后重试。"
+            ) from exc
         return {"status": "success", "daemon_started": started}
     elif code in (1, 2):
         return {"status": "pending"}
