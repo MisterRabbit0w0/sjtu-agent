@@ -229,9 +229,12 @@ def _get_or_create_session() -> dict:
             if not llm_configs:
                 llm_configs = [agent_cfg]
             primary_cfg = llm_configs[0]
+            model = primary_cfg.get("model", "deepseek-chat")
+            if not primary_cfg.get("api_key"):
+                raise RuntimeError("LLM 未配置：缺少 api_key，请先运行 sjtu-agent setup")
             _sess.update({
                 "messages":   [],
-                "model_box":  [primary_cfg["model"]],
+                "model_box":  [model],
                 "client_box": [agent._make_client(primary_cfg)],
                 "fallback_configs": llm_configs[1:],
             })

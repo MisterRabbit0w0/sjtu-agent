@@ -610,10 +610,13 @@ def refresh_aihaoke_cookies(cfg: dict) -> tuple[bool, str]:
             data = resp.json()
         except Exception:
             return False
-        if data.get("code") in (401, 404):
+        if data.get("code") not in (0, 200, None):
             return False
-        rows = (data.get("data") or {}).get("teachClassResponseList") or []
-        return isinstance(rows, list)
+        payload = data.get("data")
+        if not isinstance(payload, dict):
+            return False
+        rows = payload.get("teachClassResponseList")
+        return isinstance(rows, list) and len(rows) > 0
 
     def _collect_cookies(ctx) -> dict[str, str]:
         return {
