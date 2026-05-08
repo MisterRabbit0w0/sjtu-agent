@@ -767,6 +767,7 @@ def _model_supports_vision(model: str) -> bool:
     return any(kw in m for kw in [
         "vision", "gpt-4o", "gpt-4-turbo", "claude-3", "claude-4",
         "gemini", "qwen-vl", "qwen3vl", "glm-4v", "internvl",
+        "sonnet-4", "opus-4", "haiku-4",  # Claude 4 系列（支持下划线和连字符）
     ])
 
 
