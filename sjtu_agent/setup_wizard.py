@@ -440,6 +440,20 @@ def _maybe_install_background_services(args: argparse.Namespace, status: dict) -
         name = service.get("name") or service.get("task_name") or service.get("unit_name") or ""
         path = service.get("plist_path") or service.get("service_path") or service.get("task_name") or ""
         print(f"  - {name} -> {path}")
+
+    # Wait for web service to come up, then open browser
+    import time
+    import webbrowser
+    import urllib.request
+    url = "http://127.0.0.1:7860"
+    print(f"Waiting for web UI to start at {url} …")
+    for _ in range(15):
+        try:
+            urllib.request.urlopen(url + "/api/status", timeout=1)
+            break
+        except Exception:
+            time.sleep(1)
+    webbrowser.open(url)
     return True
 
 

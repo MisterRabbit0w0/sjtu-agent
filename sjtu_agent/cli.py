@@ -211,8 +211,16 @@ def _cmd_install_daemons(args: argparse.Namespace) -> int:
     if not args.write_only:
         import time
         import webbrowser
-        time.sleep(2)  # give launchd time to start the web service
-        webbrowser.open("http://127.0.0.1:7860")
+        import urllib.request
+        url = "http://127.0.0.1:7860"
+        # Poll until web service is up (max 15s) instead of a fixed sleep
+        for _ in range(15):
+            try:
+                urllib.request.urlopen(url + "/api/status", timeout=1)
+                break
+            except Exception:
+                time.sleep(1)
+        webbrowser.open(url)
     return 0
 
 
