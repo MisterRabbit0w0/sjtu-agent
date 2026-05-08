@@ -624,6 +624,28 @@ TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "fetch_url",
+            "description": (
+                "抓取网页内容并提取纯文本。"
+                "用户发送网址链接（微信公众号、新闻、讲座通知等）时调用此工具获取页面内容。"
+                "返回网页标题和正文文本，自动去除 HTML 标签和脚本。"
+                "适用于：微信公众号文章、校园新闻、讲座通知、活动页面等。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {
+                        "type": "string",
+                        "description": "要抓取的网址（支持 http/https）",
+                    },
+                },
+                "required": ["url"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "execute_python",
             "description": (
                 "在当前项目环境中动态执行 Python 代码片段，用于完成没有现成工具的任务。"
@@ -2942,6 +2964,77 @@ def tool_setup_telegram(telegram_token: str, allowed_ids: list | None = None) ->
     return result
 
 
+def tool_fetch_url(url: str) -> dict:
+    """
+    抓取网页内容并提取纯文本。
+    支持微信公众号、普通网页等，自动提取标题和正文。
+    """
+    try:
+        import requests
+        from bs4 import BeautifulSoup
+        import re
+
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        }
+        resp = requests.get(url, headers=headers, timeout=30)
+        resp.raise_for_status()
+        resp.encoding = resp.apparent_encoding or "utf-8"
+
+        soup = BeautifulSoup(resp.text, "html.parser")
+
+        # 移除 script、style、nav、footer 等无关标签
+        for tag in soup(["script", "style", "nav", "footer", "header", "aside"]):
+            tag.decompose()
+
+        # 提取标题
+        title = ""
+        if soup.title:
+            title = soup.title.string.strip()
+        elif soup.find("h1"):
+            title = soup.find("h1").get_text(strip=True)
+
+        # 微信公众号特殊处理
+        if "mp.weixin.qq.com" in url:
+            # 微信公众号文章标题
+            title_tag = soup.find("h1", class_="rich_media_title") or soup.find("h2", class_="rich_media_title")
+            if title_tag:
+                title = title_tag.get_text(strip=True)
+            # 正文内容
+            content_tag = soup.find("div", class_="rich_media_content") or soup.find("div", id="js_content")
+            if content_tag:
+                text = content_tag.get_text(separator="\n", strip=True)
+            else:
+                text = soup.get_text(separator="\n", strip=True)
+        else:
+            # 普通网页：尝试找 article、main 或 body
+            content_tag = soup.find("article") or soup.find("main") or soup.find("body")
+            if content_tag:
+                text = content_tag.get_text(separator="\n", strip=True)
+            else:
+                text = soup.get_text(separator="\n", strip=True)
+
+        # 清理多余空行
+        text = re.sub(r'\n\s*\n+', '\n\n', text)
+        text = text.strip()
+
+        # 截断过长内容（保留前 8000 字符）
+        if len(text) > 8000:
+            text = text[:8000] + "\n\n[内容过长，已截断...]"
+
+        return {
+            "ok": True,
+            "url": url,
+            "title": title,
+            "content": text,
+            "length": len(text),
+        }
+    except requests.RequestException as e:
+        return {"ok": False, "error": f"网络请求失败: {e}"}
+    except Exception as e:
+        return {"ok": False, "error": f"解析失败: {e}"}
+
+
 def tool_execute_python(code: str, timeout: int = 60) -> dict:
     """
     在当前进程中安全地执行动态 Python 代码片段。
@@ -3327,6 +3420,7 @@ def run_tool(name: str, args: dict) -> str:
         elif name == "read_emails":              r = tool_read_emails(**args)
         elif name == "search_emails":            r = tool_search_emails(**args)
         elif name == "send_email":               r = tool_send_email(**args)
+        elif name == "fetch_url":                r = tool_fetch_url(**args)
         elif name == "execute_python":           r = tool_execute_python(**args)
         elif name == "update_user_profile":      r = tool_update_user_profile(**args)
         elif name == "get_user_profile":         r = tool_get_user_profile()
