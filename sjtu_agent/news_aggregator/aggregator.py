@@ -56,7 +56,8 @@ class NewsAggregator:
         完整聚合流程。
         返回 (markdown_digest, telegram_html_digest)。
         """
-        top_k = top_k or self.top_k
+        if top_k is None:
+            top_k = self.top_k
         if not self.sources:
             empty_msg = "📰 新闻日报没有启用任何信息源。"
             return empty_msg, empty_msg

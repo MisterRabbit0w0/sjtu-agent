@@ -30,6 +30,21 @@ def _chunks(text: str, max_len: int) -> list[str]:
     return [text[i : i + max_len] for i in range(0, len(text), max_len)]
 
 
+def _parse_chat_ids(raw_ids) -> list[int]:
+    if isinstance(raw_ids, str):
+        candidates = raw_ids.replace(",", " ").split()
+    else:
+        candidates = raw_ids or []
+
+    chat_ids: list[int] = []
+    for value in candidates:
+        try:
+            chat_ids.append(int(value))
+        except (TypeError, ValueError):
+            continue
+    return chat_ids
+
+
 class NotificationDispatcher:
     """Send notifications through configured user channels."""
 
@@ -73,10 +88,7 @@ class NotificationDispatcher:
     ) -> NotifyResult:
         token = self.config.get("telegram_token", "")
         raw_ids = self.config.get("telegram_allowed_ids", [])
-        try:
-            allowed_ids = [int(x) for x in raw_ids]
-        except Exception:
-            allowed_ids = []
+        allowed_ids = _parse_chat_ids(raw_ids)
 
         if not token or not allowed_ids:
             return NotifyResult("telegram", ok=False, skipped=True, message="Telegram 未配置")
@@ -120,7 +132,7 @@ class NotificationDispatcher:
         try:
             from wechat_bot import ILinkClient
         except ImportError:
-            return self._send_wechat_fallback(text, token, to_user, context_token)
+            return self._send_wechat_fallback(text, token, to_user, context_token, max_len=max_len)
 
         client = ILinkClient(token)
         errors: list[str] = []
@@ -132,7 +144,15 @@ class NotificationDispatcher:
 
         return NotifyResult("wechat", ok=not errors, message="; ".join(errors))
 
-    def _send_wechat_fallback(self, text: str, token: str, to_user: str, context_token: str) -> NotifyResult:
+    def _send_wechat_fallback(
+        self,
+        text: str,
+        token: str,
+        to_user: str,
+        context_token: str,
+        *,
+        max_len: int,
+    ) -> NotifyResult:
         try:
             import httpx
         except ImportError as exc:
@@ -145,7 +165,7 @@ class NotificationDispatcher:
             "Authorization": f"Bearer {token}",
             "X-WECHAT-UIN": base64.b64encode(str(random.randint(0, 0xFFFFFFFF)).encode()).decode(),
         }
-        for chunk in _chunks(text, 4000):
+        for chunk in _chunks(text, max_len):
             body = {
                 "base_info": {"channel_version": "1.0.3"},
                 "msg": {

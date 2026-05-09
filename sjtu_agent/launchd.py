@@ -19,6 +19,17 @@ DEFAULT_REMIND_INTERVAL = 60
 DEFAULT_TELEGRAM_THROTTLE = 10
 DEFAULT_LAUNCH_AGENTS_DIR = Path.home() / "Library" / "LaunchAgents"
 
+__all__ = [
+    "DEFAULT_DAILY_REPORT_TIME",
+    "DEFAULT_NEWS_DIGEST_TIME",
+    "DEFAULT_REMIND_INTERVAL",
+    "DEFAULT_TELEGRAM_THROTTLE",
+    "DEFAULT_LAUNCH_AGENTS_DIR",
+    "available_service_names",
+    "write_launch_agent_plists",
+    "install_launch_agents",
+]
+
 
 def write_launch_agent_plists(
     output_dir: Path = DEFAULT_LAUNCH_AGENTS_DIR,

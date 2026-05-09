@@ -29,9 +29,6 @@
   "shuiyuan_user_api_client_id": "YOUR_CLIENT_ID",
 
   "news_digest": {
-    "enabled": true,
-    "schedule_hour": 10,
-    "schedule_minute": 0,
     "sources": {
       "jwc": {"enabled": true},
       "shuiyuan": {"enabled": true, "min_views": 50, "min_likes": 3},
@@ -40,7 +37,6 @@
     },
     "top_k": 8,
     "score_threshold": 0.5,
-    "channels": ["telegram", "wechat"],
-    "blocked_keywords": ["广告", "代写"]
+    "channels": ["telegram", "wechat"]
   }
 }
