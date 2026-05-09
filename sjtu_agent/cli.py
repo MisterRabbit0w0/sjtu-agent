@@ -200,6 +200,7 @@ def _cmd_install_daemons(args: argparse.Namespace) -> int:
             service_names=tuple(args.services) if args.services else None,
             python_executable=Path(args.python_executable),
             daily_report_time=args.daily_report_time,
+            news_digest_time=args.news_digest_time,
             remind_interval=args.remind_interval,
             load=not args.write_only,
             **platform_kwargs,
@@ -299,6 +300,12 @@ def build_parser() -> argparse.ArgumentParser:
         type=_parse_hhmm,
         default=(22, 0),
         help="daily report schedule in HH:MM, default 22:00",
+    )
+    install_daemons_parser.add_argument(
+        "--news-digest-time",
+        type=_parse_hhmm,
+        default=(10, 0),
+        help="news digest schedule in HH:MM, default 10:00",
     )
     install_daemons_parser.add_argument(
         "--remind-interval",

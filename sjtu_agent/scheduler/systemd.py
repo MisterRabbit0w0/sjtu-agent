@@ -4,6 +4,7 @@ sjtu_agent/scheduler/systemd.py — Linux systemd 用户单元实现
 使用 ~/.config/systemd/user/ 下的 .service 和 .timer 文件管理后台服务，
 通过 `systemctl --user` 命令加载和控制：
   - daily-report   : 每天定时触发的 timer + service
+  - news-digest    : 每天定时触发的 timer + service
   - remind-check   : 每分钟循环触发的 timer + service
   - telegram-bot   : 开机自启的 service（Restart=always）
 """
@@ -23,6 +24,14 @@ _SERVICE_SPECS = {
         "unit_name": "sjtu-agent-daily-report",
         "subcommand": "daily-report",
         "log": "daily_report.systemd.log",
+        "restart": "no",
+        "has_timer": True,
+        "timer_type": "calendar",   # OnCalendar
+    },
+    "news-digest": {
+        "unit_name": "sjtu-agent-news-digest",
+        "subcommand": "news-digest",
+        "log": "news_digest.systemd.log",
         "restart": "no",
         "has_timer": True,
         "timer_type": "calendar",   # OnCalendar
@@ -90,11 +99,12 @@ def _write_timer_unit(
     unit_name: str,
     timer_type: str,
     daily_report_time: tuple[int, int],
+    news_digest_time: tuple[int, int],
     remind_interval: int,
 ) -> Path:
     """生成并写入 .timer 单元文件，返回文件路径。"""
     if timer_type == "calendar":
-        hour, minute = daily_report_time
+        hour, minute = news_digest_time if unit_name == "sjtu-agent-news-digest" else daily_report_time
         schedule = f"OnCalendar=*-*-* {hour:02d}:{minute:02d}:00"
     else:
         # OnUnitInactiveSec：上次运行结束后等待 N 秒再次触发
@@ -127,6 +137,7 @@ def install(
     service_names: tuple[str, ...] | None = None,
     python_executable: Path | None = None,
     daily_report_time: tuple[int, int] = (22, 0),
+    news_digest_time: tuple[int, int] = (10, 0),
     remind_interval: int = 60,
     load: bool = True,
     **_,
@@ -165,6 +176,7 @@ def install(
                 unit_name=unit_name,
                 timer_type=spec["timer_type"],
                 daily_report_time=daily_report_time,
+                news_digest_time=news_digest_time,
                 remind_interval=remind_interval,
             )
 

@@ -13,30 +13,54 @@ from sjtu_agent.news_aggregator.profile import UserProfile
 from sjtu_agent.news_aggregator.ranker import NewsRanker
 from sjtu_agent.news_aggregator.digest import DigestBuilder
 from sjtu_agent.news_aggregator.storage import NewsStorage
+from sjtu_agent.config import cfg as config_store
 
 
 class NewsAggregator:
     """完整的新闻聚合流程。"""
 
     def __init__(self, llm_client=None, model: str = ""):
-        self.sources = [
-            JwcSource(),
-            ShuiyuanSource(),
-            OfficialSource(),
-            CanvasSource(),
-        ]
+        self.settings = config_store.news_digest_config
+        self.sources = self._build_sources(self.settings.get("sources", {}))
         self.profile  = UserProfile()
         self.ranker   = NewsRanker()
         self.builder  = DigestBuilder()
         self.storage  = NewsStorage()
         self.llm_client = llm_client
         self.model    = model
+        self.top_k = int(self.settings.get("top_k", 8) or 8)
+        self.score_threshold = float(self.settings.get("score_threshold", 0.5) or 0.5)
 
-    def run(self, hours: int = 24, top_k: int = 8) -> tuple[str, str]:
+    def _build_sources(self, sources_cfg: dict) -> list:
+        def enabled(name: str, default: bool = True) -> bool:
+            item = sources_cfg.get(name, {})
+            return bool(item.get("enabled", default)) if isinstance(item, dict) else default
+
+        sources = []
+        if enabled("jwc"):
+            sources.append(JwcSource())
+        if enabled("shuiyuan"):
+            sy_cfg = sources_cfg.get("shuiyuan", {}) if isinstance(sources_cfg.get("shuiyuan"), dict) else {}
+            sources.append(ShuiyuanSource(
+                min_views=int(sy_cfg.get("min_views", 50) or 50),
+                min_likes=int(sy_cfg.get("min_likes", 3) or 3),
+            ))
+        if enabled("official"):
+            sources.append(OfficialSource())
+        if enabled("canvas"):
+            sources.append(CanvasSource())
+        return sources
+
+    def run(self, hours: int = 24, top_k: int | None = None) -> tuple[str, str]:
         """
         完整聚合流程。
         返回 (markdown_digest, telegram_html_digest)。
         """
+        top_k = top_k or self.top_k
+        if not self.sources:
+            empty_msg = "📰 新闻日报没有启用任何信息源。"
+            return empty_msg, empty_msg
+
         # 1. 并发采集
         all_items: list[NewsItem] = []
         with ThreadPoolExecutor(max_workers=len(self.sources)) as pool:
@@ -70,6 +94,7 @@ class NewsAggregator:
             top_k=top_k,
             llm_client=self.llm_client,
             model=self.model,
+            score_threshold=self.score_threshold,
         )
         print(f"[news] 排序后精选 {len(ranked)} 条", flush=True)
 
@@ -85,103 +110,26 @@ class NewsAggregator:
 
     def send_via_telegram(self, html_digest: str) -> bool:
         """通过 Telegram 推送日报。"""
-        from sjtu_agent import paths as _paths
-        from sjtu_agent.paths import read_json_safe
-        import requests
+        from sjtu_agent.notifiers import NotificationDispatcher
 
-        cfg = read_json_safe(_paths.CONFIG_PATH, default={})
-        token = cfg.get("telegram_token", "")
-        allowed_ids = [int(x) for x in cfg.get("telegram_allowed_ids", [])]
-        if not token or not allowed_ids:
-            print("[news] Telegram 未配置，跳过推送", flush=True)
-            return False
-
-        success = True
-        for uid in allowed_ids:
-            # 分块发送（Telegram 限制 4096 字符）
-            text = html_digest
-            while text:
-                chunk = text[:4000]
-                text  = text[4000:]
-                try:
-                    r = requests.post(
-                        f"https://api.telegram.org/bot{token}/sendMessage",
-                        json={
-                            "chat_id": uid,
-                            "text": chunk,
-                            "parse_mode": "HTML",
-                            "disable_web_page_preview": True,
-                        },
-                        timeout=15,
-                    )
-                    if not r.ok:
-                        print(f"[news] Telegram 推送失败 uid={uid}: {r.text[:200]}", flush=True)
-                        success = False
-                except Exception as e:
-                    print(f"[news] Telegram 推送异常 uid={uid}: {e}", flush=True)
-                    success = False
-        return success
+        result = NotificationDispatcher().send_telegram(
+            html_digest,
+            parse_mode="HTML",
+            disable_web_page_preview=True,
+        )
+        if result.skipped:
+            print(f"[news] {result.message}，跳过推送", flush=True)
+        elif not result.ok:
+            print(f"[news] Telegram 推送失败：{result.message}", flush=True)
+        return result.ok
 
     def send_via_wechat(self, md_digest: str) -> bool:
         """通过微信 ilink Bot 推送日报（纯文本/Markdown）。"""
-        from sjtu_agent import paths as _paths
-        from sjtu_agent.paths import read_json_safe
-        import sys, os
+        from sjtu_agent.notifiers import NotificationDispatcher
 
-        cfg = read_json_safe(_paths.CONFIG_PATH, default={})
-        token    = cfg.get("wechat_bot_token", "")
-        to_user  = cfg.get("wechat_to_user_id", "")
-        ctx_tok  = cfg.get("wechat_context_token", "")
-        if not token or not to_user or not ctx_tok:
-            print("[news] 微信未配置（需要 wechat_bot_token / wechat_to_user_id / wechat_context_token），跳过推送", flush=True)
-            return False
-
-        # 复用 wechat_bot.py 里的 ILinkClient
-        root = _paths.DATA_DIR.parent  # repo root
-        sys.path.insert(0, str(root))
-        try:
-            from wechat_bot import ILinkClient
-        except ImportError:
-            # fallback: 直接用 httpx 发
-            try:
-                import httpx, json, base64, random, uuid
-                headers = {
-                    "Content-Type": "application/json",
-                    "AuthorizationType": "ilink_bot_token",
-                    "Authorization": f"Bearer {token}",
-                    "X-WECHAT-UIN": base64.b64encode(str(random.randint(0, 0xFFFFFFFF)).encode()).decode(),
-                }
-                body = {
-                    "base_info": {"channel_version": "1.0.3"},
-                    "msg": {
-                        "from_user_id": "",
-                        "to_user_id": to_user,
-                        "client_id": f"bot-{uuid.uuid4().hex[:12]}",
-                        "message_type": 2,
-                        "message_state": 2,
-                        "context_token": ctx_tok,
-                        "item_list": [{"type": 1, "text_item": {"text": md_digest[:4000]}}],
-                    },
-                }
-                raw = json.dumps(body, ensure_ascii=False).encode()
-                headers["Content-Length"] = str(len(raw))
-                r = httpx.post("https://ilinkai.weixin.qq.com/ilink/bot/sendmessage",
-                               content=raw, headers=headers, timeout=35)
-                return r.status_code == 200
-            except Exception as e:
-                print(f"[news] 微信推送异常（fallback）: {e}", flush=True)
-                return False
-
-        client = ILinkClient(token)
-        # 微信消息无硬性长度限制，但分块更稳妥（每块 2000 字）
-        text = md_digest
-        success = True
-        while text:
-            chunk = text[:2000]
-            text  = text[2000:]
-            try:
-                client.send(chunk, to_user_id=to_user, context_token=ctx_tok)
-            except Exception as e:
-                print(f"[news] 微信推送异常: {e}", flush=True)
-                success = False
-        return success
+        result = NotificationDispatcher().send_wechat(md_digest)
+        if result.skipped:
+            print(f"[news] {result.message}，跳过推送", flush=True)
+        elif not result.ok:
+            print(f"[news] 微信推送失败：{result.message}", flush=True)
+        return result.ok

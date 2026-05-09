@@ -24,7 +24,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
-from sjtu_agent.paths import CONFIG_PATH, DAILY_REPORT_LOG_PATH
+from sjtu_agent.compat import fix_windows_encoding
+fix_windows_encoding()
+from sjtu_agent.paths import DAILY_REPORT_LOG_PATH
 
 import agent
 import ddl_checker as dc
@@ -33,32 +35,13 @@ import ddl_checker as dc
 
 def _send_telegram(text: str) -> None:
     """向所有 allowed_ids 分块推送 Telegram 消息。"""
-    cfg = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
-    token = cfg.get("telegram_token", "")
-    allowed_ids = cfg.get("telegram_allowed_ids", [])
-    if not token or not allowed_ids:
-        print("[daily_report] Telegram 未配置，跳过推送")
-        return
+    from sjtu_agent.notifiers import NotificationDispatcher
 
-    import urllib.request
-    # Telegram 单条消息最大 4096 字符
-    chunks = [text[i:i+4000] for i in range(0, len(text), 4000)]
-    for uid in allowed_ids:
-        for chunk in chunks:
-            payload = json.dumps({
-                "chat_id": uid,
-                "text": chunk,
-                "parse_mode": "HTML",
-            }).encode()
-            req = urllib.request.Request(
-                f"https://api.telegram.org/bot{token}/sendMessage",
-                data=payload,
-                headers={"Content-Type": "application/json"},
-            )
-            try:
-                urllib.request.urlopen(req, timeout=15)
-            except Exception as e:
-                print(f"[daily_report] Telegram 推送失败 uid={uid}: {e}")
+    result = NotificationDispatcher().send_telegram(text, parse_mode="HTML")
+    if result.skipped:
+        print(f"[daily_report] {result.message}，跳过推送")
+    elif not result.ok:
+        print(f"[daily_report] Telegram 推送失败：{result.message}")
 
 
 # ── 数据收集 ──────────────────────────────────────────────────────────────────

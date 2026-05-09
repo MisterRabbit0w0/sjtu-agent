@@ -211,8 +211,20 @@ def _streamed_turn(sess: dict, user_text: str, on_progress, on_tool_result=None)
     is_anthropic = agent._is_anthropic_model(model)
 
     full_text = ""
+    logged_turn = False
     MAX_ROUNDS = 8
     saw_first_token_global = [False]
+
+    def _record_turn() -> None:
+        nonlocal logged_turn
+        if logged_turn or not full_text.strip():
+            return
+        logged_turn = True
+        try:
+            from sjtu_agent.news_aggregator.profile import log_conversation
+            log_conversation(user_text, full_text)
+        except Exception:
+            pass
 
     def _emit_first_token():
         if saw_first_token_global[0]:
@@ -279,6 +291,7 @@ def _streamed_turn(sess: dict, user_text: str, on_progress, on_tool_result=None)
             sess["messages"].append({"role": "assistant", "content": content_blocks})
 
             if not has_tool_use:
+                _record_turn()
                 return full_text
 
             tool_results = []
@@ -301,6 +314,7 @@ def _streamed_turn(sess: dict, user_text: str, on_progress, on_tool_result=None)
             api_msgs.append({"role": "user", "content": tool_results})
             sess["messages"].append({"role": "user", "content": tool_results})
 
+        _record_turn()
         return full_text
 
     # ── OpenAI 兼容路径 ──────────────────────────────────────────────────────
@@ -350,6 +364,7 @@ def _streamed_turn(sess: dict, user_text: str, on_progress, on_tool_result=None)
             if has_native_reasoning and full_reasoning:
                 assistant_msg["reasoning_content"] = full_reasoning
             sess["messages"].append(assistant_msg)
+            _record_turn()
             return full_text
 
         tc_objs = []
@@ -384,13 +399,7 @@ def _streamed_turn(sess: dict, user_text: str, on_progress, on_tool_result=None)
             messages.append(tool_msg)
             sess["messages"].append(tool_msg)
 
-    # 记录对话到 conversation_log（供用户画像更新使用）
-    try:
-        from sjtu_agent.news_aggregator.profile import log_conversation
-        log_conversation(user_text, full_text)
-    except Exception:
-        pass
-
+    _record_turn()
     return full_text
 
 

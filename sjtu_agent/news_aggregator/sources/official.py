@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import Optional
+from urllib.parse import urljoin
 
 import requests
 
@@ -34,6 +35,17 @@ def _parse_rss_date(s: str) -> Optional[datetime]:
         return dt.astimezone(CST)
     except Exception:
         return None
+
+
+def _parse_html_date(s: str) -> Optional[datetime]:
+    text = " ".join((s or "").split())
+    for fmt in ("%Y年%m月%d日", "%Y-%m-%d", "%Y/%m/%d"):
+        try:
+            dt = datetime.strptime(text, fmt)
+            return dt.replace(hour=8, tzinfo=CST)
+        except ValueError:
+            continue
+    return None
 
 
 class OfficialSource(BaseNewsSource):
@@ -89,26 +101,39 @@ class OfficialSource(BaseNewsSource):
             r.encoding = r.apparent_encoding or "utf-8"
             soup = BeautifulSoup(r.text, "html.parser")
             items = []
-            for a in soup.select("a[href]"):
-                title = a.get_text(strip=True)
+            cards = soup.select("a.card[href]")
+            anchors = cards or soup.select("a[href]")
+            for a in anchors:
+                title_el = a.select_one("p.dot") or a.select_one(".title") or a
+                title = title_el.get_text(" ", strip=True)
                 href  = a.get("href", "")
                 if not title or len(title) < 5 or not href:
                     continue
-                url = href if href.startswith("http") else _BASE + href
-                # 没有日期信息，假设是今天
-                from datetime import datetime as _dt
-                pub_dt = _dt.now(CST).replace(hour=8, minute=0, second=0, microsecond=0)
+                url = urljoin(_BASE, href)
+
+                date_el = a.select_one(".time span")
+                pub_dt = _parse_html_date(date_el.get_text(" ", strip=True) if date_el else "")
+                if pub_dt is None:
+                    continue
+
+                summary_el = a.select_one(".des")
+                summary = summary_el.get_text(" ", strip=True) if summary_el else title
+                author_el = a.select_one(".source p")
+                author = author_el.get_text(" ", strip=True) if author_el else "交大新闻网"
+
                 item = NewsItem(
                     id=self._make_id(url),
                     source=self.name,
                     title=title,
-                    summary=title,
+                    summary=self._truncate(summary),
                     url=url,
                     published_at=pub_dt,
+                    author=author,
                     category="交大新闻",
-                    tags=["官网"],
+                    tags=["官网", "新闻"],
                 )
-                items.append(item)
+                if item.age_hours() <= hours:
+                    items.append(item)
             return items[:20]  # 限制数量
         except Exception as e:
             print(f"[news/official] HTML 失败：{e}", flush=True)

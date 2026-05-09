@@ -3,6 +3,7 @@ sjtu_agent/scheduler/taskschd.py — Windows Task Scheduler 实现
 
 使用 schtasks 命令行工具管理后台服务：
   - daily-report   : 每天定时触发（如 22:00）
+  - news-digest    : 每天定时触发（默认 10:00）
   - remind-check   : 每分钟循环触发
   - telegram-bot   : 登录时自动启动，保持常驻
 """
@@ -23,6 +24,12 @@ _SERVICE_SPECS = {
         "task_name": f"{_TASK_PREFIX}-DailyReport",
         "subcommand": "daily-report",
         "log": "daily_report.task.log",
+        "schedule": "daily",    # 每天定时
+    },
+    "news-digest": {
+        "task_name": f"{_TASK_PREFIX}-NewsDigest",
+        "subcommand": "news-digest",
+        "log": "news_digest.task.log",
         "schedule": "daily",    # 每天定时
     },
     "remind-check": {
@@ -73,6 +80,7 @@ def install(
     service_names: tuple[str, ...] | None = None,
     python_executable: Path | None = None,
     daily_report_time: tuple[int, int] = (22, 0),
+    news_digest_time: tuple[int, int] = (10, 0),
     remind_interval: int = 60,
     load: bool = True,
     **_,
@@ -91,7 +99,6 @@ def install(
 
     py = str(python_executable or sys.executable)
     selected = set(service_names or _SERVICE_SPECS.keys())
-    hour, minute = daily_report_time
     # remind_interval 转换为分钟，向上取整，最小 1 分钟
     remind_minutes = max(1, (remind_interval + 59) // 60)
 
@@ -113,6 +120,7 @@ def install(
 
         # 根据调度类型构建 schtasks 参数
         if spec["schedule"] == "daily":
+            hour, minute = news_digest_time if name == "news-digest" else daily_report_time
             schtask_args = [
                 "schtasks", "/Create",
                 "/TN", task_name,
@@ -158,7 +166,8 @@ def install(
         "python_executable": py,
         "services": written,
         "note": (
-            f"日报时间: {hour:02d}:{minute:02d}，"
+            f"学习日报时间: {daily_report_time[0]:02d}:{daily_report_time[1]:02d}，"
+            f"新闻日报时间: {news_digest_time[0]:02d}:{news_digest_time[1]:02d}，"
             f"提醒检查间隔: {remind_minutes} 分钟。"
             "任务已注册到当前用户的任务计划中，重启后自动生效。"
         ),

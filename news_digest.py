@@ -18,6 +18,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 
+from sjtu_agent.compat import fix_windows_encoding
+fix_windows_encoding()
+
 from dotenv import load_dotenv
 from sjtu_agent.paths import ENV_PATH
 load_dotenv(ENV_PATH)
@@ -61,17 +64,23 @@ def main():
     print("=" * 60 + "\n")
 
     if not args.dry_run:
-        ok = aggregator.send_via_telegram(html_digest)
-        if ok:
-            print("[news] ✅ Telegram 推送成功", flush=True)
-        else:
-            print("[news] ⚠ Telegram 推送失败或未配置", flush=True)
+        from sjtu_agent.config import cfg as config_store
 
-        ok_wx = aggregator.send_via_wechat(md_digest)
-        if ok_wx:
-            print("[news] ✅ 微信推送成功", flush=True)
-        else:
-            print("[news] ⚠ 微信推送失败或未配置", flush=True)
+        news_cfg = config_store.news_digest_config
+        channels = news_cfg.get("channels", ["telegram"])
+        if "telegram" in channels:
+            ok = aggregator.send_via_telegram(html_digest)
+            if ok:
+                print("[news] ✅ Telegram 推送成功", flush=True)
+            else:
+                print("[news] ⚠ Telegram 推送失败或未配置", flush=True)
+
+        if "wechat" in channels:
+            ok_wx = aggregator.send_via_wechat(md_digest)
+            if ok_wx:
+                print("[news] ✅ 微信推送成功", flush=True)
+            else:
+                print("[news] ⚠ 微信推送失败或未配置", flush=True)
     else:
         print("[news] --dry-run 模式，跳过推送", flush=True)
 

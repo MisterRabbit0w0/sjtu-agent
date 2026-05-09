@@ -22,6 +22,7 @@ def install_daemons(
     service_names: tuple[str, ...] | None = None,
     python_executable: Path | None = None,
     daily_report_time: tuple[int, int] = (22, 0),
+    news_digest_time: tuple[int, int] = (10, 0),
     remind_interval: int = 60,
     telegram_throttle: int = 10,
     load: bool = True,
@@ -31,9 +32,10 @@ def install_daemons(
     安装后台守护进程。
 
     参数：
-        service_names       要安装的服务子集，默认全部（daily-report / remind-check / telegram-bot）
+        service_names       要安装的服务子集，默认全部
         python_executable   使用的 Python 解释器路径，默认当前解释器
-        daily_report_time   日报发送时间 (hour, minute)，默认 (22, 0)
+        daily_report_time   学习日报发送时间 (hour, minute)，默认 (22, 0)
+        news_digest_time    新闻日报发送时间 (hour, minute)，默认 (10, 0)
         remind_interval     提醒检查间隔秒数（macOS/Linux 适用），默认 60
         telegram_throttle   Telegram bot 重启节流秒数（macOS 适用），默认 10
         load                是否立即加载/启动服务，默认 True
@@ -57,6 +59,7 @@ def install_daemons(
         service_names=service_names,
         python_executable=python_executable,
         daily_report_time=daily_report_time,
+        news_digest_time=news_digest_time,
         remind_interval=remind_interval,
         telegram_throttle=telegram_throttle,
         load=load,
@@ -109,7 +112,7 @@ def daemon_status(
 
 def available_service_names() -> tuple[str, ...]:
     """返回所有可用的服务名称。"""
-    return ("daily-report", "remind-check", "telegram-bot", "wechat-bot")
+    return ("daily-report", "news-digest", "remind-check", "telegram-bot", "wechat-bot")
 
 
 def current_platform_name() -> str:
