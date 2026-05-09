@@ -26,6 +26,7 @@ class NewsRanker:
         top_k: int = 8,
         llm_client=None,
         model: str = "",
+        score_threshold: float = 0.5,
     ) -> list[tuple["NewsItem", float, str]]:
         """
         返回 [(news_item, score, reason), ...]，按 score 降序。
@@ -47,14 +48,14 @@ class NewsRanker:
             try:
                 ranked = self._llm_rank(candidates, profile_data, llm_client, model)
                 if ranked:
-                    return [r for r in ranked if r[1] >= 0.5][:top_k]
+                    return [r for r in ranked if r[1] >= score_threshold][:top_k]
             except Exception as e:
                 print(f"[ranker] LLM 精排失败，降级到关键词分数：{e}", flush=True)
 
         # 降级：直接用关键词分数
         result = []
         for item, score in candidates:
-            if score >= 0.3:
+            if score >= score_threshold:
                 result.append((item, min(score, 1.0), ""))
         # 画像为空时（所有分数都是 0），直接推送 top-k 条（时效性最高的）
         if not result:

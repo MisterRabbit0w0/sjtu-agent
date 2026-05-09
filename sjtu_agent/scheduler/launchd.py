@@ -104,6 +104,7 @@ def install(
     service_names: tuple[str, ...] | None = None,
     python_executable: Path | None = None,
     daily_report_time: tuple[int, int] = (22, 0),
+    news_digest_time: tuple[int, int] = (10, 0),
     remind_interval: int = 60,
     telegram_throttle: int = 10,
     load: bool = True,
@@ -126,7 +127,7 @@ def install(
         if name not in selected:
             continue
         plist_path = out_dir / f"{_SERVICE_SPECS[name]['label']}.plist"
-        payload = _build_plist(name, py, daily_report_time, remind_interval, telegram_throttle)
+        payload = _build_plist(name, py, daily_report_time, remind_interval, telegram_throttle, news_digest_time)
         with plist_path.open("wb") as f:
             plistlib.dump(payload, f, sort_keys=False)
         written.append({

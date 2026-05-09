@@ -366,6 +366,11 @@ def handle_message(client: ILinkClient, msg: dict) -> None:
             if _send_config_error(client, sess, from_user, ctx_token):
                 return
             reply = _capture_turn(sess, text)
+            try:
+                from sjtu_agent.news_aggregator.profile import log_conversation
+                log_conversation(text, reply)
+            except Exception:
+                pass
             # 微信消息长度限制约 4096，超出则分段发送
             _send_chunks(client, reply, from_user, ctx_token)
         except Exception as e:

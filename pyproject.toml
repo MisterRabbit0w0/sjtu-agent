@@ -20,6 +20,7 @@ py-modules = [
   "ddl_checker",
   "login",
   "mcp_server",
+  "news_digest",
   "remind_check",
   "setup_config",
   "telegram_bot",

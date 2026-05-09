@@ -268,6 +268,24 @@ def _get_config_values() -> dict:
 _chat_history: list[dict] = []   # [{role, content}, ...]
 
 
+def _last_user_message() -> str:
+    for item in reversed(_chat_history):
+        if item.get("role") == "user" and isinstance(item.get("content"), str):
+            return item["content"]
+    return ""
+
+
+def _record_profile_conversation(reply: str) -> None:
+    user_text = _last_user_message()
+    if not user_text or not reply.strip():
+        return
+    try:
+        from sjtu_agent.news_aggregator.profile import log_conversation
+        log_conversation(user_text, reply)
+    except Exception:
+        pass
+
+
 def _get_chat_client():
     """根据当前配置创建客户端。
     与 agent.py 的 _make_client 保持一致：
@@ -410,6 +428,7 @@ def _stream_chat_anthropic(client, model, _agent, max_rounds, _sse):
 
         if not has_tool_use:
             _chat_history.append({"role": "assistant", "content": full_text})
+            _record_profile_conversation(full_text)
             return
 
         # 执行工具
@@ -428,6 +447,7 @@ def _stream_chat_anthropic(client, model, _agent, max_rounds, _sse):
 
     # 超过最大轮次
     _chat_history.append({"role": "assistant", "content": full_text})
+    _record_profile_conversation(full_text)
 
 
 def _stream_chat_openai(client, model, _agent, max_rounds, _sse):
@@ -486,6 +506,7 @@ def _stream_chat_openai(client, model, _agent, max_rounds, _sse):
                 assistant_msg["reasoning_content"] = full_reasoning
             _chat_history.append(assistant_msg)
             messages.append(assistant_msg)
+            _record_profile_conversation(full_text)
             return
 
         # 构建 assistant 消息
@@ -513,6 +534,7 @@ def _stream_chat_openai(client, model, _agent, max_rounds, _sse):
             messages.append({"role": "tool", "tool_call_id": tc["id"], "content": result})
 
     _chat_history.append({"role": "assistant", "content": full_text})
+    _record_profile_conversation(full_text)
 
 
 def _test_api(api_key: str, base_url: str, model: str) -> dict:

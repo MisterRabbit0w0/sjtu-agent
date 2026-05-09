@@ -2,6 +2,7 @@ requests>=2.31.0
 plyer>=2.1.0           # 跨平台系统通知（macOS / Windows / Linux）
 beautifulsoup4>=4.12.0
 lxml>=5.0.0
+feedparser>=6.0.0
 browser-cookie3>=0.19.0
 playwright>=1.40.0
 python-dotenv>=1.0.0
