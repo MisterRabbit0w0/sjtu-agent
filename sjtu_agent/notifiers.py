@@ -33,8 +33,13 @@ def _chunks(text: str, max_len: int) -> list[str]:
 def _parse_chat_ids(raw_ids) -> list[int]:
     if isinstance(raw_ids, str):
         candidates = raw_ids.replace(",", " ").split()
+    elif isinstance(raw_ids, int) and not isinstance(raw_ids, bool):
+        candidates = [raw_ids]
     else:
-        candidates = raw_ids or []
+        try:
+            candidates = list(raw_ids or [])
+        except TypeError:
+            candidates = []
 
     chat_ids: list[int] = []
     for value in candidates:

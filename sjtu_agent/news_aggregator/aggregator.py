@@ -16,11 +16,26 @@ from sjtu_agent.news_aggregator.storage import NewsStorage
 from sjtu_agent.config import cfg as config_store
 
 
+def _as_int(value, default: int) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _as_float(value, default: float) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
 class NewsAggregator:
     """完整的新闻聚合流程。"""
 
     def __init__(self, llm_client=None, model: str = ""):
-        self.settings = config_store.news_digest_config
+        settings = config_store.news_digest_config
+        self.settings = settings if isinstance(settings, dict) else {}
         self.sources = self._build_sources(self.settings.get("sources", {}))
         self.profile  = UserProfile()
         self.ranker   = NewsRanker()
@@ -28,10 +43,13 @@ class NewsAggregator:
         self.storage  = NewsStorage()
         self.llm_client = llm_client
         self.model    = model
-        self.top_k = int(self.settings.get("top_k", 8) or 8)
-        self.score_threshold = float(self.settings.get("score_threshold", 0.5) or 0.5)
+        self.top_k = _as_int(self.settings.get("top_k", 8) or 8, 8)
+        self.score_threshold = _as_float(self.settings.get("score_threshold", 0.5) or 0.5, 0.5)
 
     def _build_sources(self, sources_cfg: dict) -> list:
+        if not isinstance(sources_cfg, dict):
+            sources_cfg = {}
+
         def enabled(name: str, default: bool = True) -> bool:
             item = sources_cfg.get(name, {})
             return bool(item.get("enabled", default)) if isinstance(item, dict) else default
@@ -42,8 +60,8 @@ class NewsAggregator:
         if enabled("shuiyuan"):
             sy_cfg = sources_cfg.get("shuiyuan", {}) if isinstance(sources_cfg.get("shuiyuan"), dict) else {}
             sources.append(ShuiyuanSource(
-                min_views=int(sy_cfg.get("min_views", 50) or 50),
-                min_likes=int(sy_cfg.get("min_likes", 3) or 3),
+                min_views=_as_int(sy_cfg.get("min_views", 50) or 50, 50),
+                min_likes=_as_int(sy_cfg.get("min_likes", 3) or 3, 3),
             ))
         if enabled("official"):
             sources.append(OfficialSource())
