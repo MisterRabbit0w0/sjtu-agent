@@ -134,7 +134,7 @@ def make_session(cookies: dict, referer: str = "") -> requests.Session:
 # ── Platform 1: Canvas LMS ────────────────────────────────────────────────────
 
 def fetch_canvas(cfg: dict) -> list[dict]:
-    """通过 Canvas REST API 获取近期必做作业。"""
+    """通过 Canvas REST API 获取所有未过期的必做作业。"""
     token = cfg.get("canvas_token", "").strip()
     base = cfg.get("canvas_base_url", "https://oc.sjtu.edu.cn").rstrip("/")
     if not token or token.startswith("YOUR_"):
@@ -163,52 +163,40 @@ def fetch_canvas(cfg: dict) -> list[dict]:
     now = datetime.now(CST)
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
 
-    # 2. 拉取近期作业，并用 /students/submissions 批量核查个人提交状态。
-    # Canvas bucket=upcoming 会在截止时间一过就隐藏未提交作业；这里额外用
-    # bucket=past + 今日过滤来保留当天已过期但未提交的作业。
+    # 2. 拉取完整作业列表，并用 /students/submissions 批量核查个人提交状态。
+    # Canvas bucket=upcoming 只返回平台认定的近期项目，会漏掉更远期但已有
+    # due_at 的作业；因此这里使用无 bucket 的 assignments 全量分页再本地过滤。
     # （include[]=submission 在 SJTU Canvas 有 bug，数据不准确）
     for course in courses:
         cid = course["id"]
         cname = course.get("name", f"课程{cid}")
 
-        # 2a. 拉取作业列表：upcoming + 今日已过期
+        # 2a. 拉取作业列表：完整 assignments 分页 + 本地按 due_at 过滤
         pending: list[dict] = []
         seen_ids: set[int] = set()
-        queries: list[dict] = [
-            {"bucket": "upcoming", "per_page": 50, "order_by": "due_at"},
-            {"bucket": "past", "per_page": 50, "order_by": "due_at", "order": "desc"},
-        ]
-        for asgn_params in queries:
-            asgn_url: str | None = f"{base}/api/v1/courses/{cid}/assignments"
-            is_past = asgn_params.get("bucket") == "past"
-            while asgn_url:
-                try:
-                    r = session.get(asgn_url, params=asgn_params, timeout=15)
-                    r.raise_for_status()
-                except requests.RequestException as e:
-                    print(f"[Canvas] 获取 {cname} 作业失败：{e}")
-                    break
-                page_data = r.json()
-                stop_past = False
-                for a in page_data:
-                    if not a.get("submission_types"):
-                        continue
-                    due = parse_dt(a.get("due_at", ""))
-                    if not due:
-                        continue
-                    if due < today_start:
-                        if is_past:
-                            stop_past = True
-                        continue
-                    aid = a["id"]
-                    if aid in seen_ids:
-                        continue
-                    seen_ids.add(aid)
-                    pending.append({"id": aid, "name": a.get("name", "未知作业"), "due": due})
-                if stop_past:
-                    break
-                asgn_url = r.links.get("next", {}).get("url")
-                asgn_params = {}
+        asgn_url: str | None = f"{base}/api/v1/courses/{cid}/assignments"
+        asgn_params: dict = {"per_page": 100, "order_by": "due_at"}
+        while asgn_url:
+            try:
+                r = session.get(asgn_url, params=asgn_params, timeout=15)
+                r.raise_for_status()
+            except requests.RequestException as e:
+                print(f"[Canvas] 获取 {cname} 作业失败：{e}")
+                break
+            page_data = r.json()
+            for a in page_data:
+                if not a.get("submission_types"):
+                    continue
+                due = parse_dt(a.get("due_at", ""))
+                if not due or due < today_start:
+                    continue
+                aid = a["id"]
+                if aid in seen_ids:
+                    continue
+                seen_ids.add(aid)
+                pending.append({"id": aid, "name": a.get("name", "未知作业"), "due": due})
+            asgn_url = r.links.get("next", {}).get("url")
+            asgn_params = {}
 
         if not pending:
             continue
@@ -1072,6 +1060,21 @@ def _icourse_login_with_creds(cfg: dict) -> dict | None:
         return None
 
 
+def _extract_icourse_term_id(final_url: str, html: str = "") -> int | None:
+    m = re.search(r'[?&]tid=(\d+)', final_url)
+    if m:
+        return int(m.group(1))
+
+    for pattern in (
+        r'\btermId\s*[:=]\s*["\']?(\d{6,})',
+        r'\bterm_id\s*[:=]\s*["\']?(\d{6,})',
+    ):
+        m = re.search(pattern, html)
+        if m:
+            return int(m.group(1))
+    return None
+
+
 def _discover_icourse_term_id(cookies: dict, course_id: str) -> int | None:
     """
     用 Playwright 访问课程页，从 URL 或页面数据中提取当前 term_id。
@@ -1095,18 +1098,11 @@ def _discover_icourse_term_id(cookies: dict, course_id: str) -> int | None:
                      wait_until="domcontentloaded", timeout=20000)
             page.wait_for_timeout(2000)
             
-            # 从 URL 提取 tid 参数
             final_url = page.url
+            html = page.content()
             browser.close()
-            
-            import re
-            m = re.search(r'[?&]tid=(\d+)', final_url)
-            if m:
-                return int(m.group(1))
-            
-            # 如果 URL 没有，尝试从页面 JS 变量提取
-            # （这里可以扩展更多提取逻辑）
-            return None
+
+            return _extract_icourse_term_id(final_url, html)
     except Exception as e:
         print(f"[icourse163] 发现 term_id 失败：{e}")
         return None
@@ -1184,7 +1180,8 @@ def _fetch_icourse_one(session: requests.Session, course: dict, cookies: dict) -
 def _icourse_rpc(session: requests.Session, term_id: int) -> dict | None:
     """尝试调用 icourse163 的 JSON RPC 接口获取课程结构。"""
     url = "https://www.icourse163.org/web/j/courseBean.getLastLearnedMocTermDto.rpc"
-    try:
+
+    def _post_once() -> dict | None:
         r = session.post(
             url,
             data={"csrfKey": session.cookies.get("NTESSTUDYSI", ""), "termId": str(term_id)},
@@ -1194,6 +1191,20 @@ def _icourse_rpc(session: requests.Session, term_id: int) -> dict | None:
             data = r.json()
             if data.get("result"):
                 return data["result"]
+        return None
+
+    try:
+        result = _post_once()
+        if result is not None:
+            return result
+
+        # icourse163 may return code=0 with an empty result until the web session
+        # has visited the homepage in the same requests.Session.
+        try:
+            session.get("https://www.icourse163.org/", timeout=15)
+        except requests.RequestException:
+            pass
+        return _post_once()
     except (requests.RequestException, json.JSONDecodeError):
         pass
     return None
