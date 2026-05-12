@@ -41,7 +41,7 @@ try:
 except ImportError:
     HAS_PLAYWRIGHT = False
 
-import ddl_checker as dc
+from sjtu_agent.ddl import checker as dc
 
 
 TOOLS = [
@@ -662,7 +662,7 @@ TOOLS = [
                         "type": "string",
                         "description": (
                             "要执行的 Python 代码。"
-                            "可通过 import agent, ddl_checker as dc 引入项目模块。"
+                            "可通过 import sjtu_agent.agent as agent; from sjtu_agent.ddl import checker as dc 引入项目模块。"
                             "结果用 print() 输出，或直接 raise 异常报错。\n"
                             "示例：将所有未读邮件设为已读：\n"
                             "  import imaplib, ssl, os\n"
@@ -1019,7 +1019,7 @@ def _auto_create_canvas_token(base_url: str, token_purpose: str = "SJTU Agent") 
 
     try:
         from playwright.sync_api import sync_playwright
-        import login as login_module
+        from sjtu_agent.auth import login as login_module
     except Exception as exc:
         return {"success": False, "error": f"自动创建前置依赖不可用：{exc}"}
 
@@ -1574,7 +1574,7 @@ def _setup_shuiyuan_session(cfg: dict, username: str, password: str) -> dict:
         return _shuiyuan_session_error("未安装 playwright")
 
     try:
-        import login as login_module
+        from sjtu_agent.auth import login as login_module
     except Exception as e:
         return _shuiyuan_session_error(f"加载登录模块失败：{e}")
 
@@ -1839,7 +1839,7 @@ def _prefetch_ddls_background() -> None:
     # 用 -c 片段在子进程里静默执行拉取
     _script = (
         "import sys, os; sys.path.insert(0, os.path.dirname(sys.argv[0]) or '.'); "
-        "import agent as _a, ddl_checker as _dc; "
+        "import sjtu_agent.agent as _a; from sjtu_agent.ddl import checker as _dc; "
         "_a._fetch_ddls_parallel(_dc.load_config())"
     )
     try:
@@ -3103,7 +3103,7 @@ def tool_execute_python(code: str, timeout: int = 60) -> dict:
         "from pathlib import Path\n"
         "from dotenv import load_dotenv\n"
         f"load_dotenv({str(ENV_PATH)!r})\n"
-        "import ddl_checker as dc\n"
+        "from sjtu_agent.ddl import checker as dc\n"
     )
     full_code = preamble + "\n" + code
 

@@ -32,7 +32,13 @@ assignments_test_aihaoke/
 # Build artifacts
 build/
 *.egg-info/
+android/.gradle/
+android/local.properties
+android/**/build/
 
 # Local launchd output and logs
 com.sjtu.*.plist
 *.log
+
+# Android project
+/android/

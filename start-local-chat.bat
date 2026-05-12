@@ -8,7 +8,16 @@ cd /d "%~dp0"
 
 set "PYTHONUTF8=1"
 set "PYTHONIOENCODING=utf-8"
+set "PYTHON_EXE=%~dp0.venv\Scripts\python.exe"
 set "SJTU_AGENT_EXE=%~dp0.venv\Scripts\sjtu-agent.exe"
+
+if not exist "%PYTHON_EXE%" (
+    echo [sjtu-agent] Cannot find "%PYTHON_EXE%".
+    echo [sjtu-agent] Run this first:
+    echo     powershell -ExecutionPolicy Bypass -File "%~dp0install.ps1"
+    if /i not "%SJTU_AGENT_NO_PAUSE%"=="1" pause
+    exit /b 1
+)
 
 if not exist "%SJTU_AGENT_EXE%" (
     echo [sjtu-agent] Cannot find "%SJTU_AGENT_EXE%".
@@ -16,6 +25,18 @@ if not exist "%SJTU_AGENT_EXE%" (
     echo     powershell -ExecutionPolicy Bypass -File "%~dp0install.ps1"
     if /i not "%SJTU_AGENT_NO_PAUSE%"=="1" pause
     exit /b 1
+)
+
+echo [sjtu-agent] Compiling Python sources...
+"%PYTHON_EXE%" -m compileall -q sjtu_agent
+set "COMPILE_EXIT_CODE=%ERRORLEVEL%"
+
+if not "%COMPILE_EXIT_CODE%"=="0" (
+    echo.
+    echo [sjtu-agent] Python source compilation failed.
+    echo [sjtu-agent] Fix the syntax/import errors above before starting local chat.
+    if /i not "%SJTU_AGENT_NO_PAUSE%"=="1" pause
+    exit /b %COMPILE_EXIT_CODE%
 )
 
 echo [sjtu-agent] Starting local terminal chat...

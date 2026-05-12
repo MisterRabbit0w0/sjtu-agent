@@ -52,7 +52,7 @@ ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 from sjtu_agent.paths import CONFIG_PATH
 
-import agent
+from sjtu_agent import agent
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("wechat_bot")
