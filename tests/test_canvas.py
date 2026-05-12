@@ -1,6 +1,6 @@
 from unittest.mock import patch
 
-import ddl_checker as dc
+from sjtu_agent.ddl import checker as dc
 
 
 class _JsonResponse:
@@ -47,7 +47,7 @@ class _CanvasSession:
 
 
 def test_canvas_fetch_uses_full_assignment_list_not_upcoming_bucket_only():
-    with patch("ddl_checker.requests.Session", return_value=_CanvasSession()):
+    with patch("sjtu_agent.ddl.checker.requests.Session", return_value=_CanvasSession()):
         items = dc.fetch_canvas({
             "canvas_token": "token",
             "canvas_base_url": "https://canvas.test",

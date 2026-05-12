@@ -28,8 +28,8 @@ from sjtu_agent.compat import fix_windows_encoding
 fix_windows_encoding()
 from sjtu_agent.paths import DAILY_REPORT_LOG_PATH
 
-import agent
-import ddl_checker as dc
+from sjtu_agent import agent
+from sjtu_agent.ddl import checker as dc
 
 # ── Telegram 推送 ─────────────────────────────────────────────────────────────
 
@@ -269,7 +269,7 @@ def _log(msg: str) -> None:
 
 # ── 入口 ──────────────────────────────────────────────────────────────────────
 
-if __name__ == "__main__":
+def main() -> None:
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument("--test", action="store_true", help="打印汇报但不发送 Telegram")
@@ -289,3 +289,7 @@ if __name__ == "__main__":
     except Exception as e:
         _log(f"❌ 发生错误: {e}")
         traceback.print_exc()
+
+
+if __name__ == "__main__":
+    main()

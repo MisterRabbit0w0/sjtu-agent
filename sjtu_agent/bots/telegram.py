@@ -34,8 +34,8 @@ sys.path.insert(0, str(ROOT))
 from sjtu_agent.paths import CONFIG_PATH
 
 import telebot
-import agent
-import ddl_checker as dc
+from sjtu_agent import agent
+from sjtu_agent.ddl import checker as dc
 
 # ── 配置加载 ──────────────────────────────────────────────────────────────────
 
@@ -774,7 +774,7 @@ def cmd_report(msg):
     typing_thread.start()
     def run_report():
         try:
-            import daily_report
+            from sjtu_agent.reporting import daily as daily_report
             report = daily_report.build_report()
             _send_chunks(chat_id, report, parse_mode="HTML")
         except Exception as e:
@@ -1296,7 +1296,7 @@ def _wait_for_network(max_wait: int = 120, interval: int = 5) -> "telebot.types.
             _time.sleep(wait)
 
 
-if __name__ == "__main__":
+def main() -> None:
     if "--test" in sys.argv:
         me = bot.get_me()
         print(f"✅ Bot 连通正常：@{me.username}（{me.first_name}）")
@@ -1335,3 +1335,7 @@ if __name__ == "__main__":
     print("   已注册 8 条命令")
     print(f"   等待消息… （Ctrl+C 停止）")
     bot.infinity_polling(timeout=30, long_polling_timeout=30)
+
+
+if __name__ == "__main__":
+    main()

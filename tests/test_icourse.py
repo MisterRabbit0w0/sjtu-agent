@@ -1,4 +1,4 @@
-import ddl_checker as dc
+from sjtu_agent.ddl import checker as dc
 
 
 class _JsonResponse:

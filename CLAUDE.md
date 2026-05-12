@@ -45,7 +45,7 @@ sjtu-agent news-digest    # 智能新闻日报
 
 ### 双层入口结构
 
-项目根目录保留了一组**向后兼容的顶层脚本**（`agent.py`、`ddl_checker.py`、`login.py`、`telegram_bot.py`、`wechat_bot.py` 等），它们 re-export `sjtu_agent/` 包内的实际实现。CLI 子命令通过 `runpy.run_module()` 调用这些顶层模块名，因此这些文件不能删除。
+项目入口已迁移到 `sjtu_agent/` 包内。CLI 子命令直接调用包内 `main()` 函数，不再依赖根目录顶层 `.py` 脚本或 `runpy` 分发。
 
 实际逻辑在 `sjtu_agent/` 包中：
 
@@ -101,4 +101,4 @@ Web Server（`web/server.py`）是纯 stdlib `http.server`，无框架依赖。S
 - 中文用户界面（提示词、错误信息、CLI 输出均为中文）
 - `atomic_write_json()` / `read_json_safe()` 用于状态文件读写（防崩溃数据丢失）
 - Windows 兼容：Spinner 在 Windows 上降级为静态文本；stdout 使用 `errors="replace"` 防止编码崩溃
-- 顶层脚本（`agent.py` 等）是兼容垫片，修改功能应编辑 `sjtu_agent/` 包内对应文件
+- 根目录不再保留 `agent.py` 等兼容垫片，修改功能应编辑 `sjtu_agent/` 包内对应文件

@@ -135,7 +135,7 @@ class NotificationDispatcher:
             sys.path.insert(0, str(_paths.PROJECT_ROOT))
 
         try:
-            from wechat_bot import ILinkClient
+            from sjtu_agent.bots.wechat import ILinkClient
         except ImportError:
             return self._send_wechat_fallback(text, token, to_user, context_token, max_len=max_len)
 

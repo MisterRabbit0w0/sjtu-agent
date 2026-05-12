@@ -26,7 +26,7 @@ import sys
 from datetime import datetime, timedelta, timezone
 from sjtu_agent.paths import CONFIG_PATH, REMINDERS_PATH, REMIND_CHECK_LOG_PATH, REMIND_STATE_PATH
 
-import ddl_checker as dc
+from sjtu_agent.ddl import checker as dc
 
 # ── 配置 ────────────────────────────────────────────────────────────────────
 STATE_PATH         = REMIND_STATE_PATH   # 记录已发送通知
@@ -366,7 +366,7 @@ def print_list() -> None:
 
 # ── 入口 ─────────────────────────────────────────────────────────────────────
 
-if __name__ == "__main__":
+def main() -> None:
     args = sys.argv[1:]
     if "--list" in args:
         print_list()
@@ -376,3 +376,7 @@ if __name__ == "__main__":
         print("[TEST 模式] 检查完毕，以上为将要触发的通知（未实际弹出）")
     else:
         check_and_notify(test_mode=False)
+
+
+if __name__ == "__main__":
+    main()

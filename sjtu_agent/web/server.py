@@ -295,7 +295,7 @@ def _get_chat_client():
     _project_root = str(Path(__file__).resolve().parent.parent.parent)
     if _project_root not in sys.path:
         sys.path.insert(0, _project_root)
-    import agent as _agent
+    from sjtu_agent import agent as _agent
 
     agent_cfg = _agent.load_agent_config()
     base_url = agent_cfg.get("base_url") or None
@@ -321,7 +321,7 @@ def _stream_chat(user_message: str):
     _project_root = str(Path(__file__).resolve().parent.parent.parent)
     if _project_root not in sys.path:
         sys.path.insert(0, _project_root)
-    import agent as _agent
+    from sjtu_agent import agent as _agent
 
     if not _chat_history:
         _now = _dt.datetime.now()

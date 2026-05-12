@@ -28,7 +28,7 @@ from sjtu_agent.paths import (
 from dotenv import load_dotenv
 load_dotenv(ENV_PATH)
 
-import ddl_checker as dc
+from sjtu_agent.ddl import checker as dc
 
 # CST 时区，避免 datetime.now() 受系统时区/DST 影响导致冷却期错乱
 CST = timezone(timedelta(hours=8))
@@ -109,7 +109,7 @@ def _get_urgent_ddls() -> list[dict]:
     """获取24小时内截止的 DDL 列表。"""
     try:
         cfg = dc.load_config()
-        import ddl_checker as dc2
+        from sjtu_agent.ddl import checker as dc2
         import datetime as _dt
         now = _dt.datetime.now(dc2.CST)
         deadline = now + timedelta(hours=24)
@@ -233,5 +233,9 @@ def run_care_check() -> None:
         print(f"[care_check] {now.strftime('%H:%M')} 暂无需要发送的关怀消息", flush=True)
 
 
-if __name__ == "__main__":
+def main() -> None:
     run_care_check()
+
+
+if __name__ == "__main__":
+    main()

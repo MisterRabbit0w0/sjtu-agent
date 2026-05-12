@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import importlib
 import json
-import runpy
 import shutil
 import subprocess
 import sys
@@ -116,7 +115,7 @@ def _install_playwright_chromium() -> bool:
 
 
 def _doctor_status() -> dict:
-    import agent
+    from sjtu_agent import agent
 
     return agent.tool_check_setup()
 
@@ -130,7 +129,7 @@ def _print_runtime_summary() -> None:
 
 
 def _agent_config_status() -> dict[str, object]:
-    import agent
+    from sjtu_agent import agent
 
     cfg = agent.load_agent_config()
     return {
@@ -194,7 +193,7 @@ def _apply_agent_config_updates(updates: dict[str, str]) -> dict[str, str] | Non
     if not any(updates.values()):
         return None
 
-    import agent
+    from sjtu_agent import agent
 
     current = agent.load_agent_config()
     saved = {
@@ -231,7 +230,7 @@ def _cli_credential_updates(args: argparse.Namespace) -> dict[str, str]:
 
 
 def _collect_credential_updates(args: argparse.Namespace, status: dict) -> dict[str, str]:
-    import agent
+    from sjtu_agent import agent
 
     updates = _cli_credential_updates(args)
 
@@ -273,7 +272,7 @@ def _collect_credential_updates(args: argparse.Namespace, status: dict) -> dict[
 
 
 def _apply_credential_updates(updates: dict[str, str]) -> dict[str, object] | None:
-    import agent
+    from sjtu_agent import agent
 
     if not any(updates.values()):
         return None
@@ -281,7 +280,7 @@ def _apply_credential_updates(updates: dict[str, str]) -> dict[str, object] | No
 
 
 def _maybe_create_skeleton_config() -> None:
-    import agent
+    from sjtu_agent import agent
 
     if not CONFIG_PATH.exists():
         agent.tool_save_credentials()
@@ -297,7 +296,7 @@ def _needs_cookie_import(status: dict) -> bool:
 
 
 def _import_browser_cookies() -> bool:
-    import setup_config
+    from sjtu_agent import setup_config
 
     try:
         setup_config.main()
@@ -642,7 +641,7 @@ class SetupConversation:
         return "这一步的目标是把缺的配置补齐。你可以直接继续、跳过，或者输入 status 查看我当前检测到的缺口。"
 
     def open_canvas_page(self) -> None:
-        import agent
+        from sjtu_agent import agent
 
         canvas_info = agent.tool_setup_canvas(open_browser=True)
         settings_url = canvas_info.get("settings_url", "https://oc.sjtu.edu.cn/profile/settings")
@@ -858,7 +857,7 @@ class SetupConversation:
             return True
 
     def handle_canvas(self, status: dict) -> bool:
-        import agent
+        from sjtu_agent import agent
 
         def attempt_auto_canvas() -> bool:
             self.say("我现在开始自动尝试创建 Canvas token。你会先看到一个浏览器窗口；如果自动流程失败，我会回退到手动方式。")
@@ -1034,9 +1033,10 @@ class SetupConversation:
     def launch_main_agent(self) -> int:
         self.say("正在启动 SJTU Agent 主对话。之后你可以直接描述需求，或者输入 /help 查看命令。")
         old_argv = sys.argv[:]
-        sys.argv = ["agent"]
+        sys.argv = ["sjtu-agent chat"]
         try:
-            runpy.run_module("agent", run_name="__main__")
+            from sjtu_agent.agent.chat_loop import main as agent_main
+            agent_main()
             return 0
         except SystemExit as exc:
             code = exc.code

@@ -571,7 +571,7 @@ def refresh_aihaoke_cookies(cfg: dict) -> tuple[bool, str]:
         pass
 
     try:
-        from login import login_aihaoke as _login_aihaoke
+        from sjtu_agent.auth.login import login_aihaoke as _login_aihaoke
     except Exception as e:
         return False, f"加载 aihaoke 登录器失败：{e}"
 

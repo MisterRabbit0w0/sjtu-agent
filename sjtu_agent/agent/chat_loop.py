@@ -12,7 +12,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 from openai import OpenAI
 
-import ddl_checker as dc
+from sjtu_agent.ddl import checker as dc
 
 from sjtu_agent.paths import AGENT_CONFIG_PATH, ENV_PATH, DDL_CACHE_PATH, PROVIDERS_CONFIG_PATH
 from sjtu_agent.terminal_ui import print_markdown_message, print_rule
@@ -46,7 +46,7 @@ def _prefetch_ddls_background() -> None:
     # 用 -c 片段在子进程里静默执行拉取
     _script = (
         "import sys, os; sys.path.insert(0, os.path.dirname(sys.argv[0]) or '.'); "
-        "import agent as _a, ddl_checker as _dc; "
+        "import sjtu_agent.agent as _a; from sjtu_agent.ddl import checker as _dc; "
         "_a._fetch_ddls_parallel(_dc.load_config())"
     )
     try:

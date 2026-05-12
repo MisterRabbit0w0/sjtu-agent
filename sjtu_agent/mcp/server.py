@@ -37,7 +37,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 from mcp.server.fastmcp import FastMCP
-import ddl_checker as dc
+from sjtu_agent.ddl import checker as dc
 
 mcp = FastMCP("sjtu-ddl")
 
@@ -160,7 +160,7 @@ def get_all(
     }
 
 
-if __name__ == "__main__":
+def main() -> None:
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument("--http", action="store_true", help="以 HTTP/SSE 模式启动（供 ChatGPT Desktop 使用）")
@@ -174,3 +174,7 @@ if __name__ == "__main__":
         mcp.run(transport="sse")
     else:
         mcp.run()
+
+
+if __name__ == "__main__":
+    main()
