@@ -39,3 +39,6 @@ android/**/build/
 # Local launchd output and logs
 com.sjtu.*.plist
 *.log
+
+# Android project
+/android/
