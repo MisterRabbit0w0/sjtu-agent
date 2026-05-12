@@ -30,12 +30,6 @@ ChatGPT Desktop：
      http://localhost:8765/sse
 """
 
-import sys
-from pathlib import Path
-
-# 确保能 import 同目录下的 ddl_checker
-sys.path.insert(0, str(Path(__file__).parent))
-
 from mcp.server.fastmcp import FastMCP
 from sjtu_agent.ddl import checker as dc
 
